@@ -13,35 +13,44 @@ packages can both pass and still disagree with each other -- and one of them
 can be wrong about the released files without any test noticing.  That is not
 hypothetical: it is how a transposed `beta` shipped in the Python package.
 
-## What it finds today
+## What it found
 
 Replay, on `blue_1.mat`, hydrophones 0/3/7, the same probe and start index:
 
-| what is compared | NMSE |
-|---|---|
-| the rational resampler alone, no channel | -258 dB |
-| full replay with `phi_hat` removed | -234 dB |
-| full replay with `phi_hat` active | **-63 dB** |
-| ditto, with Python delaying `phi_hat` one sample | -233 dB |
+| what is compared | NMSE, before | after |
+|---|---|---|
+| the rational resampler alone, no channel | -258 dB | -258 dB |
+| full replay with `phi_hat` removed | -234 dB | -234 dB |
+| full replay with `phi_hat` active | **-63 dB** | **-233 dB** |
 
-The first two rows say that `h_hat`'s axis layout, the spline interpolation,
-the time-varying convolution, both resamplings and the up-conversion are
-identical to the last bit -- MATLAB's `resample` and SciPy's `resample_poly`
-turn out to build the same filter.  The third row says the delay/phase
-trajectory is not.  The fourth says exactly why:
+The first two rows said `h_hat`'s axis layout, the spline interpolation, the
+time-varying convolution, both resamplings and the up-conversion were identical
+to the last bit -- MATLAB's `resample` and SciPy's `resample_poly` turn out to
+build the same filter, so there was no resampler floor to hide behind.  The
+third row put the disagreement in the delay/phase trajectory, and nowhere else:
 
-> With `start = s`, both implementations interpolate `h_hat` onto
-> `(s + 0:N-1) / fs_delay`.  MATLAB then takes the phase from
-> `phi_hat(s : s+N-1)` -- 1-based, so elements *s* through *s+N-1* -- while
-> Python takes `phi_hat[s : s+N]` -- 0-based, so elements *s+1* onward.
-> Element *n* of `phi_hat` belongs at time `(n-1) / fs_delay`, so Python's
-> pairing is the self-consistent one and **MATLAB's phase runs one sample of
-> `fs_delay` ahead of the impulse response it multiplies**.
+> With `start = s`, both implementations interpolated `h_hat` onto
+> `(s + 0:N-1) / fs_delay`.  MATLAB then took the phase from
+> `phi_hat(s : s+N-1)` -- 1-based, so elements *s* through *s+N-1*, which sit
+> at `(s-1 : s+N-2) / fs_delay`.  Every output sample therefore carried a
+> phase one sample of `fs_delay` too early.  `unpack.m`, in the same
+> repository, already used the right origin: `t_orig = (0:N_phi-1)/fs_delay`.
 
-Delaying `phi_hat` by one sample on the Python side reproduces the MATLAB
-output to the numerical floor, so that offset is the whole of the difference,
-not merely most of it.  It is worth about 0.07% rms on this channel, because
-`h_hat` changes slowly against `fs_time`.  The fix belongs in `replay.m`.
+Fixed in `uwa-channels/matlab` on Sep. 16, 2026 by interpolating onto
+`(start - 1 + 0:N-1) / fs_delay`; the MATLAB test suite passes unchanged and
+the two implementations now agree to -233 dB, which is the numerical floor.
+The error was worth about 0.07% rms on this channel, because `h_hat` moves
+slowly against `fs_time`.
+
+The harness keeps a deliberately misaligned run -- MATLAB given `start` rather
+than `start+1` -- as a check on itself.  It reads -60 dB.  A comparison that
+could not see a one-sample offset would pass everything, including the defect
+it was built to find.
+
+Still open, and not covered here because `blue_1.mat` has no `f_resamp`:
+`unpack.m` builds the `f_resamp` phase ramp on `(1:N_phi)` where `unpack.py`
+uses `arange(N_phi)`, and where `t_orig` two lines below it starts at zero.
+That is the same off-by-one in the same family.
 
 The MATLAB output is also 98 samples longer for the same input: it allocates
 `T + buffer + L` with `buffer = 20` where Python allocates `T + L`.  Harmless,

@@ -47,17 +47,17 @@
     "welch_nperseg": 4096
   },
   "tolerances": {
-    "_comment": "Set from a measured run on blue_1/blue_noise; see README 'Setting the tolerances'. Anything at -200 dB is a machine-precision claim.",
+    "_comment": "Set from measured runs; see README 'Setting the tolerances'. Anything at -200 dB is a claim about floating point, not about the algorithm.",
     "replay_resampler_nmse_db": -200.0,
     "replay_static_nmse_db": -200.0,
-    "replay_phi_emulation_nmse_db": -200.0,
-    "replay_nmse_db": -55.0,
+    "replay_nmse_db": -200.0,
     "replay_lag_samples": 0.0,
     "noise_std_rel": 0.02,
     "noise_kurtosis_abs": 0.15,
     "noise_ks_stat": 0.01,
     "noise_psd_rms_db": 0.8,
     "noise_coherence_rms": 0.03,
-    "noise_theory_coherence_rms": 0.03
+    "noise_theory_coherence_rms": 0.03,
+    "replay_offset_probe_db": -100.0
   }
 }

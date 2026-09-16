@@ -9,19 +9,11 @@ function run_matlab()
 %    artifacts/matlab_replay.mat   y, y_same_start, y_resamp
 %    artifacts/matlab_noise.mat    w, beta
 %
-% ``start`` in config.json is the Python (0-based) index.  Two replays are run
-% because the two implementations cannot be aligned on both quantities at once:
-%
-%    y             start+1, the natural 0-based to 1-based index translation.
-%                  The phase trajectory phi_hat then lines up sample for
-%                  sample, and the impulse-response interpolation grid is one
-%                  sample of fs_delay later than Python's.
-%    y_same_start  the same integer.  The interpolation grid lines up and the
-%                  phase index is off by one instead.
-%
-% Which of the two matches better is the answer to a real question about the
-% two implementations, so the comparer is given both rather than a choice made
-% here.
+% ``start`` in config.json is the Python (0-based) index, so MATLAB is given
+% ``start + 1`` throughout.  A second, deliberately misaligned replay is run at
+% the same integer: it is one sample of fs_delay out, and the comparer checks
+% that it looks clearly worse.  That is the harness testing itself -- a
+% comparison that cannot see a one-sample offset would pass everything.
 %
 % Author: Zhengnan Li
 % Email : uwa-channels@ofdm.link
@@ -59,7 +51,7 @@ y_same_start = replay(x, fs, array_index, channel, start);
 % The same replay with the phase trajectory removed, so that h_hat, the spline
 % interpolation and the two resamplings are the only things acting.
 static = rmfield(channel, 'phi_hat');
-y_static = replay(x, fs, array_index, static, start);
+y_static = replay(x, fs, array_index, static, start+1);
 
 fprintf('matlab replay: y %dx%d, control %d, p/q = %d/%d\n', ...
     size(y, 1), size(y, 2), numel(y_resamp), p, q);

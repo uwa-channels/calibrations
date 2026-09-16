@@ -85,26 +85,27 @@ def compare_replay(cfg):
     fs = cfg["replay"]["fs"]
     margin = 200
 
+    def worst(key_py, key_ml):
+        return max(nmse_db(*trim(py[key_py][:, m], ml[key_ml][:, m], margin))
+                   for m in range(py["y"].shape[1]))
+
     say("## Replay")
     say()
     say(f"Probe: {len(py['y_resamp'])} samples at {fs / 1e3:g} kHz through "
-        f"`{cfg['data']['channel_file']}`, start index "
-        f"{int(py['start'].ravel()[0])}, hydrophones {idx} (0-based).  Both "
-        "implementations were handed the same probe samples from `probe.mat`, "
-        "so nothing here depends on a random number generator.")
+        f"`{cfg['data']['channel_file']}`, Python start index "
+        f"{int(py['start'].ravel()[0])} and MATLAB start index "
+        f"{int(py['start'].ravel()[0]) + 1}, hydrophones {idx} (0-based).  "
+        "Both implementations were handed the same probe samples from "
+        "`probe.mat`, so nothing here depends on a random number generator.")
     say()
     say(f"Python returns {py['y'].shape[0]} samples, MATLAB "
         f"{ml['y'].shape[0]}: MATLAB allocates `T + buffer + L` with "
         f"`buffer = 20` where Python allocates `T + L`, which after the "
-        f"closing resample by q/p is "
-        f"{ml['y'].shape[0] - py['y'].shape[0]} extra samples.  The comparison "
-        "uses the common interior, dropping "
+        f"closing resample by q/p is {ml['y'].shape[0] - py['y'].shape[0]} "
+        f"extra samples.  The comparison uses the common interior, dropping "
         f"{margin} samples at each end.")
     say()
 
-    # Four comparisons, narrowing from "everything" to "only the phase index".
-    say("### Where the two agree, and where they do not")
-    say()
     say("| what is compared | NMSE | reading |")
     say("|---|---|---|")
 
@@ -115,75 +116,55 @@ def compare_replay(cfg):
     check("resampler control", e_res, tol["replay_resampler_nmse_db"],
           e_res <= tol["replay_resampler_nmse_db"], "dB")
 
-    e_static = max(nmse_db(*trim(py["y_static"][:, m], ml["y_static"][:, m], margin))
-                   for m in range(py["y"].shape[1]))
+    e_static = worst("y_static", "y_static")
     say(f"| full replay, `phi_hat` removed | **{e_static:.0f} dB** | "
         "`h_hat` layout, spline interpolation, time-varying convolution, both "
-        "resamplings and the up-conversion are identical |")
+        "resamplings and the up-conversion agree to the last bit |")
     check("replay with no tracking", e_static, tol["replay_static_nmse_db"],
           e_static <= tol["replay_static_nmse_db"], "dB")
 
-    e_phi = max(nmse_db(*trim(py["y"][:, m], ml["y"][:, m], margin))
-                for m in range(py["y"].shape[1]))
-    e_phi2 = max(nmse_db(*trim(py["y"][:, m], ml["y_same_start"][:, m], margin))
-                 for m in range(py["y"].shape[1]))
-    say(f"| full replay, `phi_hat` active | **{min(e_phi, e_phi2):.1f} dB** | "
-        "the delay/phase trajectory is the only thing left, and it disagrees |")
-    check("replay with delay tracking", min(e_phi, e_phi2), tol["replay_nmse_db"],
-          min(e_phi, e_phi2) <= tol["replay_nmse_db"], "dB")
+    e_phi = worst("y", "y")
+    say(f"| full replay, `phi_hat` active | **{e_phi:.0f} dB** | "
+        "the delay/phase trajectory agrees too |")
+    check("replay with delay tracking", e_phi, tol["replay_nmse_db"],
+          e_phi <= tol["replay_nmse_db"], "dB")
 
-    e_emul = max(nmse_db(*trim(py["y_phi_emul"][:, m], ml["y_same_start"][:, m], margin))
-                 for m in range(py["y"].shape[1]))
-    say(f"| ditto, Python delaying `phi_hat` one sample | **{e_emul:.0f} dB** | "
-        "a one-sample index offset accounts for all of it |")
-    check("replay, MATLAB phase convention emulated", e_emul,
-          tol["replay_phi_emulation_nmse_db"],
-          e_emul <= tol["replay_phi_emulation_nmse_db"], "dB")
+    e_off = worst("y", "y_same_start")
+    say(f"| ditto, MATLAB given `start` instead of `start+1` | "
+        f"**{e_off:.0f} dB** | deliberately one sample out, and it shows |")
+    check("one-sample offset is detected", -e_off, -tol["replay_offset_probe_db"],
+          e_off > tol["replay_offset_probe_db"], "dB")
     say()
 
-    say("### Finding: `phi_hat` is indexed one sample ahead in MATLAB")
-    say()
-    say("With `start = s`, both implementations interpolate `h_hat` onto "
-        "`(s + 0:N-1) / fs_delay`.  MATLAB then takes the phase from "
-        "`phi_hat(s : s+N-1)`, 1-based, which is elements *s* through *s+N-1*; "
-        "Python takes `phi_hat[s : s+N]`, 0-based, which is elements *s+1* "
-        "onward.  Element *n* of `phi_hat` belongs at time `(n-1) / fs_delay`, "
-        "so Python's pairing is the self-consistent one and MATLAB's phase "
-        "runs one sample of `fs_delay` ahead of the impulse response it "
-        "multiplies.  Delaying `phi_hat` by one sample on the Python side "
-        f"reproduces the MATLAB output to {e_emul:.0f} dB, which is the "
-        "numerical floor, so this is the whole of the difference and not "
-        "merely most of it.")
-    say()
-    say("It is a small error -- about "
-        f"{100 * 10 ** (min(e_phi, e_phi2) / 20):.2f}% rms on this channel, "
-        "because `h_hat` changes slowly against `fs_time` -- but it is a real "
-        "one, and it is in MATLAB's `replay.m`, not in Python's.")
+    say("The last row is the harness testing itself.  A comparison that cannot "
+        "see a one-sample offset in `phi_hat` would pass everything, including "
+        "the defect this suite was built to find: before "
+        "`replay.m` was corrected on Sep. 16, 2026, the aligned row above read "
+        "-63 dB rather than "
+        f"{e_phi:.0f} dB, because MATLAB interpolated `h_hat` onto "
+        "`(start + 0:N-1)/fs_delay` while taking the phase from "
+        "`phi_hat(start : start+N-1)`, whose samples sit one sample of "
+        "`fs_delay` earlier.  `unpack.m` had the origin right; `replay.m` did "
+        "not.")
     say()
 
-    say("### Per hydrophone, with `phi_hat` active")
+    say("### Per hydrophone")
     say()
-    say("| hydrophone | NMSE, MATLAB `start+1` | lag | NMSE, same `start` | lag |")
-    say("|---|---|---|---|---|")
+    say("| hydrophone | NMSE, aligned | lag | NMSE, one sample out |")
+    say("|---|---|---|---|")
     for m in range(py["y"].shape[1]):
         a1, b1 = trim(py["y"][:, m], ml["y"][:, m], margin)
         a2, b2 = trim(py["y"][:, m], ml["y_same_start"][:, m], margin)
-        e1, e2 = nmse_db(a1, b1), nmse_db(a2, b2)
-        l1, l2 = best_lag(a1, b1), best_lag(a2, b2)
-        say(f"| {idx[m]} | {e1:.1f} dB | {l1:+d} | {e2:.1f} dB | {l2:+d} |")
-        lag = min(abs(l1), abs(l2))
+        say(f"| {idx[m]} | {nmse_db(a1, b1):.0f} dB | {best_lag(a1, b1):+d} | "
+            f"{nmse_db(a2, b2):.1f} dB |")
+        lag = abs(best_lag(a1, b1))
         check(f"replay lag, hydrophone {idx[m]}", lag, tol["replay_lag_samples"],
               lag <= tol["replay_lag_samples"], "samples")
-    say()
-    say("Neither column can be made exact: translating the 0-based start to "
-        "1-based aligns the phase index and shifts the interpolation grid, "
-        "passing the same integer does the reverse.  That is the same "
-        "off-by-one seen from the other side.")
     say()
 
     # Figures
     a, b = trim(py["y"][:, 0], ml["y"][:, 0], margin)
-    asx, bsx = trim(py["y_static"][:, 0], ml["y_static"][:, 0], margin)
+    ao, bo = trim(py["y"][:, 0], ml["y_same_start"][:, 0], margin)
     n0 = len(a) // 2
     seg = slice(n0, n0 + 400)
     fig, ax = plt.subplots(3, 1, figsize=(9, 9), constrained_layout=True)
@@ -193,10 +174,10 @@ def compare_replay(cfg):
     ax[0].set_xlabel("Sample"); ax[0].legend(); ax[0].grid(alpha=0.3)
 
     ref = 20 * np.log10(np.abs(a).max())
+    ax[1].plot(20 * np.log10(np.abs(ao - bo) + 1e-300) - ref, lw=0.6,
+               label="MATLAB one sample out")
     ax[1].plot(20 * np.log10(np.abs(a - b) + 1e-300) - ref, lw=0.6,
-               label="with phi_hat")
-    ax[1].plot(20 * np.log10(np.abs(asx - bsx) + 1e-300) - ref, lw=0.6,
-               label="phi_hat removed")
+               label="aligned")
     ax[1].set_ylim(-320, 0)
     ax[1].set_title("Python minus MATLAB, dB relative to peak")
     ax[1].set_xlabel("Sample"); ax[1].legend(); ax[1].grid(alpha=0.3)

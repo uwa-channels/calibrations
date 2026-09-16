@@ -69,21 +69,11 @@ def main():
     static = {k: channel[k] for k in ("h_hat", "params", "version")}
     y_static = replay(x, rcfg["fs"], array_index, static, start=rcfg["start"])
 
-    # MATLAB's replay indexes phi_hat one sample ahead of the grid it
-    # interpolates h_hat onto (see report).  Reproduce that convention here by
-    # delaying phi_hat a sample, so the comparer can show that it accounts for
-    # the whole of the remaining difference rather than merely most of it.
-    phi = np.array(channel["phi_hat"])
-    emulated = dict(static)
-    emulated["phi_hat"] = np.vstack([phi[:1], phi[:-1]])
-    y_phi_emul = replay(x, rcfg["fs"], array_index, emulated, start=rcfg["start"])
-
     savemat(
         ARTIFACTS / "python_replay.mat",
         {
             "y": y,
             "y_static": y_static,
-            "y_phi_emul": y_phi_emul,
             "y_resamp": y_resamp.reshape(-1, 1),
             "start": float(rcfg["start"]),
             "array_index": array_index.reshape(1, -1).astype(float),
