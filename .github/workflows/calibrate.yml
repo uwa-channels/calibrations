@@ -1,0 +1,123 @@
+name: Calibrate
+
+# Runs both implementations against the same released files and compares them.
+# Pulls each implementation from its default branch, so a change to either is
+# caught against the other rather than only against its own fixtures.
+
+on:
+  workflow_dispatch:
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1"        # Mondays, 06:00 UTC
+  repository_dispatch:
+    types: [implementation-changed]
+
+env:
+  UWA_CHANNELS_CACHE: ${{ github.workspace }}/data
+
+jobs:
+  calibrate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the calibration harness
+        uses: actions/checkout@v5
+
+      - name: Check out uwa-channels/python
+        uses: actions/checkout@v5
+        with:
+          repository: uwa-channels/python
+          path: impl/python
+
+      - name: Check out uwa-channels/matlab
+        uses: actions/checkout@v5
+        with:
+          repository: uwa-channels/matlab
+          path: impl/matlab
+
+      - name: Record which commits are being compared
+        run: |
+          echo "python  $(git -C impl/python rev-parse --short HEAD)" | tee versions.txt
+          echo "matlab  $(git -C impl/matlab rev-parse --short HEAD)" | tee -a versions.txt
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: pip install numpy scipy matplotlib h5py
+
+      # The channel file is 206 MB.  Keyed on config.json so that pointing the
+      # harness at a different record or file fetches afresh.
+      - name: Restore the library files
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.UWA_CHANNELS_CACHE }}
+          key: uwa-channels-${{ hashFiles('config.json') }}
+
+      - name: Fetch from Zenodo
+        run: python calib.py
+
+      - name: Build the shared probe
+        run: python make_probe.py
+
+      - name: Run the Python implementation
+        run: PYTHONPATH=impl/python/src python run_python.py
+
+      # MATLAB needs no license on a GitHub-hosted runner for a public
+      # repository.  A private one needs a MATLAB_BATCH_LICENSE_TOKEN secret;
+      # without it this step and the next are skipped and the workflow still
+      # reports the Python-side checks against beta.
+      - name: Set up MATLAB
+        id: matlab
+        continue-on-error: true
+        uses: matlab-actions/setup-matlab@v2
+        with:
+          release: R2024b
+          products: Signal_Processing_Toolbox
+
+      - name: Run the MATLAB implementation
+        id: matlab_run
+        if: steps.matlab.outcome == 'success'
+        continue-on-error: true
+        uses: matlab-actions/run-command@v2
+        env:
+          UWA_MATLAB_SRC: ${{ github.workspace }}/impl/matlab/src
+          UWA_MATLAB_REPO: ${{ github.workspace }}/impl/matlab
+          MLM_LICENSE_TOKEN: ${{ secrets.MATLAB_BATCH_LICENSE_TOKEN }}
+        with:
+          command: run_matlab
+
+      - name: Compare
+        if: steps.matlab_run.outcome == 'success'
+        run: python compare.py
+
+      - name: Publish the report
+        if: always()
+        run: |
+          {
+            echo "### Commits compared"
+            echo '```'
+            cat versions.txt 2>/dev/null || echo "unknown"
+            echo '```'
+            cat artifacts/report.md 2>/dev/null || echo "No report: the comparison did not run."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the report and figures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: calibration-report
+          path: |
+            artifacts/report.md
+            figures/*.png
+            versions.txt
+          if-no-files-found: warn
+
+      - name: Fail if MATLAB could not run
+        if: steps.matlab.outcome == 'success' && steps.matlab_run.outcome != 'success'
+        run: |
+          echo "MATLAB was set up but run_matlab failed; see the log above."
+          exit 1

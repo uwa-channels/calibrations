@@ -1,0 +1,63 @@
+{
+  "_comment": "Single source of truth for both implementations. Python and MATLAB both read this file; nothing here is duplicated in code.",
+  "data": {
+    "zenodo_record": "21287414",
+    "zenodo_doi": "10.5281/zenodo.21287414",
+    "channel_file": "blue_1.mat",
+    "noise_file": "blue_noise.mat",
+    "md5": {
+      "blue_1.mat": "6776481ad636e40b1d6038fa37121fb7",
+      "blue_noise.mat": "039ffcd3d74cb87f418b052933e0b750"
+    }
+  },
+  "replay": {
+    "fs": 48000.0,
+    "fc": 13000.0,
+    "symbol_rate": 4800.0,
+    "rolloff": 0.25,
+    "span_symbols": 10,
+    "n_symbols": 2047,
+    "guard_samples": 4800,
+    "symbol_seed": 20260916,
+    "start": 100000,
+    "array_index": [
+      0,
+      3,
+      7
+    ]
+  },
+  "noise": {
+    "fs": 48000.0,
+    "n_samples": 524288,
+    "array_index": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11
+    ],
+    "seed": 1994,
+    "welch_nperseg": 4096
+  },
+  "tolerances": {
+    "_comment": "Set from a measured run on blue_1/blue_noise; see README 'Setting the tolerances'. Anything at -200 dB is a machine-precision claim.",
+    "replay_resampler_nmse_db": -200.0,
+    "replay_static_nmse_db": -200.0,
+    "replay_phi_emulation_nmse_db": -200.0,
+    "replay_nmse_db": -55.0,
+    "replay_lag_samples": 0.0,
+    "noise_std_rel": 0.02,
+    "noise_kurtosis_abs": 0.15,
+    "noise_ks_stat": 0.01,
+    "noise_psd_rms_db": 0.8,
+    "noise_coherence_rms": 0.03,
+    "noise_theory_coherence_rms": 0.03
+  }
+}

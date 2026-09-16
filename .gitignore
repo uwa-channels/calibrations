@@ -1,0 +1,9 @@
+# Library MAT-files: 206 MB, fetched from Zenodo on demand.
+*.mat
+!artifacts/.gitkeep
+
+# Everything a run produces.
+artifacts/
+figures/
+__pycache__/
+*.pyc
