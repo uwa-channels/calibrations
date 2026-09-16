@@ -11,11 +11,10 @@ function run_matlab()
 %    artifacts/matlab_<case>_noise.mat    w, beta
 %
 % `start` and `array_index` in config.json are the Python 0-based values, so
-% MATLAB is given them plus one throughout.  A second, deliberately misaligned
-% replay is run at the same integer: it is one sample of fs_delay out, and the
-% comparer checks that it looks clearly worse.  That is the harness testing
-% itself -- a comparison that cannot see a one-sample offset would pass
-% everything, including the defect it was built to find.
+% MATLAB is given them plus one throughout.  A second replay is run at the same
+% integer, which misaligns the two by a sample of fs_delay on purpose; the
+% comparer checks that it looks clearly worse, which is how the harness
+% establishes that it can resolve a difference that small.
 %
 % Author: Zhengnan Li
 % Email : uwa-channels@ofdm.link

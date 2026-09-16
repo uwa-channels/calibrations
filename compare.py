@@ -131,7 +131,7 @@ def compare_replay(case, cfg):
 
     e_off = worst("y", "y_same_start")
     say(f"| ditto, MATLAB given `start` not `start+1` | **{e_off:.0f} dB** | "
-        "deliberately one sample out, and it shows |")
+        "a deliberate misalignment, to show the comparison resolves one |")
     check(f"{name}: one-sample offset is detected", -e_off,
           -tol["replay_offset_probe_db"], e_off > tol["replay_offset_probe_db"], "dB")
     say()
@@ -152,7 +152,7 @@ def compare_replay(case, cfg):
     ax[0].set_xlabel("Sample"); ax[0].legend(); ax[0].grid(alpha=0.3)
     ref = 20 * np.log10(np.abs(a).max())
     ax[1].plot(20 * np.log10(np.abs(ao - bo) + 1e-300) - ref, lw=0.6,
-               label="MATLAB one sample out")
+               label="deliberately misaligned")
     ax[1].plot(20 * np.log10(np.abs(a - b) + 1e-300) - ref, lw=0.6, label="aligned")
     ax[1].set_ylim(-320, 0); ax[1].set_xlabel("Sample")
     ax[1].set_title("Python minus MATLAB, dB relative to peak")
@@ -200,11 +200,9 @@ def compare_unpack(case, cfg):
           -tol["unpack_f_resamp_effect_db"],
           e_effect > tol["unpack_f_resamp_effect_db"], "dB")
     say()
-    say("Until Sep. 16, 2026 the second row read -44 dB: MATLAB built the "
-        "`f_resamp` phase ramp on `(1:N_phi)` where `t_orig`, the grid it is "
-        "interpolated from, is `(0:N_phi-1)/fs_delay`, so the ramp started one "
-        "sample of `fs_delay` in.  That put a constant phase rotation, and "
-        "through `phase_drift` a constant delay offset, on every unpacked tap.")
+    say("The third row is the guard on the second: `f_resamp` has to change the "
+        "output substantially, or the row above it would agree for the wrong "
+        "reason.")
     say()
 
     t = py["u"].shape[2] // 2

@@ -3,7 +3,7 @@
   "data": {
     "zenodo_record": "21287414",
     "zenodo_doi": "10.5281/zenodo.21287414",
-    "_comment": "One entry per channel/noise pair.  `start` is the Python 0-based index into phi_hat; MATLAB is given start+1.  `array_index` is 0-based likewise.  `f_resamp` is attached to the channel by both runners -- the released files do not carry one, and the f_resamp path needs exercising: it is where the second off-by-one lived.",
+    "_comment": "One entry per channel/noise pair.  `start` is the Python 0-based index into the phase trajectory; MATLAB is given start+1.  `array_index` is 0-based likewise.  `f_resamp` is attached to the channel by both runners: the released files do not carry one, and without it the phase-ramp path in unpack would go untested on real data.",
     "cases": [
       {
         "name": "blue_1",

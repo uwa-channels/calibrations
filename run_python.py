@@ -11,8 +11,8 @@ disagreed at all, that would floor every other comparison.  Measuring it
 separately is what lets the rest be read as statements about the algorithms.
 
 ``u`` and ``u_fr`` are the same channel unpacked without and with ``f_resamp``.
-The released files carry no ``f_resamp``, and the path needs exercising: it is
-where a second off-by-one lived until Sep. 16, 2026.
+The released files carry no ``f_resamp``, so the runners attach one; without
+that the phase-ramp path would go untested on real data.
 
 Author: Zhengnan Li
 Email : uwa-channels@ofdm.link
