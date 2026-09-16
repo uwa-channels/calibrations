@@ -207,22 +207,29 @@ def compare_unpack(case, cfg):
         "through `phase_drift` a constant delay offset, on every unpacked tap.")
     say()
 
-    k = py["u"].shape[0]
     t = py["u"].shape[2] // 2
+    peak = np.abs(py["u"]).max()
     fig, ax = plt.subplots(1, 2, figsize=(11, 4), constrained_layout=True)
-    ax[0].plot(20 * np.log10(np.abs(py["u"][:, 0, t]) + 1e-300), label="Python")
-    ax[0].plot(20 * np.log10(np.abs(ml["u"][:, 0, t]) + 1e-300), "--", label="MATLAB")
+    ax[0].plot(20 * np.log10(np.abs(py["u"][:, 0, t]) / peak + 1e-12), label="Python")
+    ax[0].plot(20 * np.log10(np.abs(ml["u"][:, 0, t]) / peak + 1e-12), "--",
+               label="MATLAB")
+    ax[0].set_ylim(-80, 5)
     ax[0].set_title(f"{name}: unpacked delay profile, mid-record")
-    ax[0].set_xlabel("Delay tap"); ax[0].legend(); ax[0].grid(alpha=0.3)
+    ax[0].set_xlabel("Delay tap"); ax[0].set_ylabel("dB re peak")
+    ax[0].legend(); ax[0].grid(alpha=0.3)
+
+    # Sorted magnitude of the disagreement, relative to the peak tap.  The
+    # buffer taps are exactly zero in both, hence the floor.
     for key, lab in (("u", "no f_resamp"), ("u_fr", "f_resamp")):
-        d = np.abs(py[key] - ml[key]).ravel()
-        ax[1].plot(20 * np.log10(np.sort(d)[::max(1, len(d) // 2000)] + 1e-320),
-                   label=lab)
-    ax[1].set_title("Sorted |Python - MATLAB|, dB")
-    ax[1].set_xlabel("Sample (sorted)"); ax[1].legend(); ax[1].grid(alpha=0.3)
+        d = np.sort(np.abs(py[key] - ml[key]).ravel())
+        d = d[:: max(1, len(d) // 2000)]
+        ax[1].plot(np.linspace(0, 100, len(d)),
+                   20 * np.log10(d / peak + 1e-18), label=lab)
+    ax[1].set_ylim(-360, 0)
+    ax[1].set_title("Sorted |Python - MATLAB|, dB re peak tap")
+    ax[1].set_xlabel("Percentile of samples"); ax[1].legend(); ax[1].grid(alpha=0.3)
     fig.savefig(FIGURES / f"unpack_{name}.png", dpi=110)
     plt.close(fig)
-    del k
 
 
 # ---------------------------------------------------------------------------
