@@ -1,121 +1,125 @@
 """Run the Python implementation and write its results to artifacts/.
 
-Produces
-    artifacts/python_replay.mat   y            (N, M) replay output
-                                  y_resamp     (N2, 1) resampler-only control
-    artifacts/python_noise.mat    w            (n, M) noisegen output
-                                  beta         (M, M, K) in MATLAB layout
+For each case in config.json, produces
+    artifacts/python_<case>_replay.mat   y, y_static, y_resamp
+    artifacts/python_<case>_unpack.mat   u, u_fr
+    artifacts/python_<case>_noise.mat    w, beta
 
 The resampler control matters: ``replay`` puts the probe through a rational
-resampler twice, and MATLAB's ``resample`` and SciPy's ``resample_poly`` build
-their anti-aliasing filters differently (least-squares versus windowed sinc,
-same Kaiser beta and same length).  That difference alone puts a floor under
-any cross-language comparison, so measure it separately instead of attributing
-it to ``replay``.
+resampler twice, so if MATLAB's ``resample`` and SciPy's ``resample_poly``
+disagreed at all, that would floor every other comparison.  Measuring it
+separately is what lets the rest be read as statements about the algorithms.
+
+``u`` and ``u_fr`` are the same channel unpacked without and with ``f_resamp``.
+The released files carry no ``f_resamp``, and the path needs exercising: it is
+where a second off-by-one lived until Sep. 16, 2026.
 
 Author: Zhengnan Li
 Email : uwa-channels@ofdm.link
 License: MIT
 """
 
-import subprocess
 import sys
 from fractions import Fraction
+from pathlib import Path
 
 import numpy as np
 import scipy.signal as sg
 from scipy.io import loadmat, savemat
 
-from calib import ARTIFACTS, config, ensure_data
+from calib import ARTIFACTS, cases, config, ensure_case
 
 
-def git_describe(path):
-    try:
-        out = subprocess.run(
-            ["git", "-C", str(path), "rev-parse", "--short", "HEAD"],
-            capture_output=True, text=True, timeout=10,
-        )
-        return out.stdout.strip() or "unknown"
-    except Exception:
-        return "unknown"
+def run_case(case, cfg, x):
+    from uwa_channels import load_channel, load_noise, noisegen, replay, unpack
 
-
-def main():
-    import uwa_channels
-    from uwa_channels import load_channel, load_noise, noisegen, replay
-
-    cfg = config()
-    rcfg, ncfg = cfg["replay"], cfg["noise"]
-    channel_path, noise_path = ensure_data()
-
-    probe = loadmat(ARTIFACTS / "probe.mat")
-    x = np.asarray(probe["input"]).ravel()
-
+    name = case["name"]
+    fs = cfg["probe"]["fs"]
+    channel_path, noise_path = ensure_case(case)
     channel = load_channel(str(channel_path))
     fs_delay = channel["params"]["fs_delay"][0, 0]
 
-    # replay's own resampling ratio, reproduced here for the control.
-    frac = Fraction(fs_delay / rcfg["fs"]).limit_denominator()
+    # ---- replay -----------------------------------------------------------
+    frac = Fraction(fs_delay / fs).limit_denominator()
     down = sg.resample_poly(x, frac.numerator, frac.denominator)
     y_resamp = sg.resample_poly(down, frac.denominator, frac.numerator)
 
-    array_index = np.asarray(rcfg["array_index"], dtype=int)
-    y = replay(x, rcfg["fs"], array_index, channel, start=rcfg["start"])
+    idx = np.asarray(case["replay"]["array_index"], dtype=int)
+    start = case["replay"]["start"]
+    y = replay(x, fs, idx, channel, start=start)
 
-    # The same replay with the phase trajectory removed.  h_hat, the spline
-    # interpolation and the two resamplings are then the only things acting, so
-    # this separates a disagreement about the signal path from a disagreement
-    # about how phi_hat is indexed against it.
+    # The same replay with the phase trajectory removed, so that h_hat, the
+    # spline interpolation and the two resamplings are the only things acting.
     static = {k: channel[k] for k in ("h_hat", "params", "version")}
-    y_static = replay(x, rcfg["fs"], array_index, static, start=rcfg["start"])
+    y_static = replay(x, fs, idx, static, start=start)
 
-    savemat(
-        ARTIFACTS / "python_replay.mat",
-        {
-            "y": y,
-            "y_static": y_static,
-            "y_resamp": y_resamp.reshape(-1, 1),
-            "start": float(rcfg["start"]),
-            "array_index": array_index.reshape(1, -1).astype(float),
-            "fs_delay": float(fs_delay),
-            "resamp_p": float(frac.numerator),
-            "resamp_q": float(frac.denominator),
-            "impl": "python",
-            "version": uwa_channels.__version__ if hasattr(uwa_channels, "__version__") else "",
-            "commit": git_describe(__import__("pathlib").Path(uwa_channels.__file__).parent),
-            "python": sys.version.split()[0],
-            "numpy": np.__version__,
-            "scipy": __import__("scipy").__version__,
-        },
-        do_compression=True,
-    )
-    print(f"python replay: y {y.shape}, control {y_resamp.shape}, p/q = {frac}")
+    savemat(ARTIFACTS / f"python_{name}_replay.mat", {
+        "y": y, "y_static": y_static, "y_resamp": y_resamp.reshape(-1, 1),
+        "start": float(start), "array_index": idx.reshape(1, -1).astype(float),
+        "fs_delay": float(fs_delay),
+        "resamp_p": float(frac.numerator), "resamp_q": float(frac.denominator),
+    }, do_compression=True)
+    print(f"[{name}] replay: y {y.shape}, control {y_resamp.shape}, p/q = {frac}")
 
+    # ---- unpack -----------------------------------------------------------
+    ucfg, shared = case["unpack"], cfg["unpack"]
+    uidx = list(ucfg["array_index"])
+    u = unpack(ucfg["fs_out"], uidx, channel, shared["buffer_left"],
+               shared["buffer_right"])
+    # Build the f_resamp channel explicitly rather than copying the open
+    # file: an h5py.File also carries `meta` and `#refs#`, which unpack has no
+    # use for and which would differ from what MATLAB's load() hands over.
+    tracked = {k: channel[k] for k in ("h_hat", "params", "version")}
+    for k in ("phi_hat", "theta_hat"):
+        if k in channel:
+            tracked[k] = channel[k]
+    tracked["f_resamp"] = np.array([[ucfg["f_resamp"]]])
+    u_fr = unpack(ucfg["fs_out"], uidx, tracked,
+                  shared["buffer_left"], shared["buffer_right"])
+    savemat(ARTIFACTS / f"python_{name}_unpack.mat", {
+        "u": u, "u_fr": u_fr, "fs_out": float(ucfg["fs_out"]),
+        "f_resamp": float(ucfg["f_resamp"]),
+        "array_index": np.asarray(uidx, dtype=float).reshape(1, -1),
+    }, do_compression=True)
+    print(f"[{name}] unpack: {u.shape} at {ucfg['fs_out']} Hz, "
+          f"f_resamp {ucfg['f_resamp']}")
+
+    # ---- noise ------------------------------------------------------------
+    ncfg = cfg["noise"]
     noise = load_noise(str(noise_path))
     beta = np.asarray(noise["beta"])
     # Store beta in the stored MATLAB layout so the comparer has one reference
-    # regardless of which loader read it.  h5py reverses every axis.
+    # whichever loader read it.  h5py reverses every axis.
     if beta.ndim == 3 and beta.shape[0] != beta.shape[1]:
         beta = np.transpose(beta, (2, 1, 0))
 
     np.random.seed(ncfg["seed"])
-    idx = list(ncfg["array_index"])
-    w = noisegen((ncfg["n_samples"], len(idx)), ncfg["fs"], idx, noise)
+    nidx = list(case["noise"]["array_index"])
+    w = noisegen((ncfg["n_samples"], len(nidx)), ncfg["fs"], nidx, noise)
+    savemat(ARTIFACTS / f"python_{name}_noise.mat", {
+        "w": w, "beta": beta,
+        "Fs": float(np.asarray(noise["Fs"]).ravel()[0]),
+        "alpha": float(np.asarray(noise["alpha"]).ravel()[0]),
+        "fs": float(ncfg["fs"]),
+        "array_index": np.asarray(nidx, dtype=float).reshape(1, -1),
+    }, do_compression=True)
+    print(f"[{name}] noisegen: w {w.shape}, beta {beta.shape}")
 
-    savemat(
-        ARTIFACTS / "python_noise.mat",
-        {
-            "w": w,
-            "beta": beta,
-            "Fs": float(np.asarray(noise["Fs"]).ravel()[0]),
-            "fs": float(ncfg["fs"]),
-            "alpha": float(np.asarray(noise["alpha"]).ravel()[0]),
-            "array_index": np.asarray(idx, dtype=float).reshape(1, -1),
-            "impl": "python",
-        },
-        do_compression=True,
-    )
-    print(f"python noisegen: w {w.shape}, beta {beta.shape}")
+
+def main():
+    cfg = config()
+    ARTIFACTS.mkdir(parents=True, exist_ok=True)
+    x = np.asarray(loadmat(ARTIFACTS / "probe.mat")["input"]).ravel()
+
+    import uwa_channels
+    savemat(ARTIFACTS / "python_env.mat", {
+        "impl": "python", "python": sys.version.split()[0],
+        "numpy": np.__version__, "scipy": __import__("scipy").__version__,
+        "package": str(Path(uwa_channels.__file__).parent),
+    })
+
+    for case in cases():
+        run_case(case, cfg, x)
 
 
 if __name__ == "__main__":

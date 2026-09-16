@@ -1,12 +1,12 @@
 """Compare the two implementations and write artifacts/report.md.
 
-Replay is compared sample by sample: the two runners were handed the same
-probe, the same channel file, the same hydrophones and the same start index, so
-the outputs should agree to within the numerical floor.  Noise cannot be
+Replay and unpack are compared sample by sample: both runners were handed the
+same probe, the same channel file, the same hydrophones and the same start
+index, so the outputs should agree to the numerical floor.  Noise cannot be
 compared that way -- NumPy's and MATLAB's generators produce different streams
 from the same seed -- so it is compared as a distribution, a spectrum and a
-spatial covariance, each also checked against what ``beta`` predicts, which is
-an absolute reference rather than a cross-check.
+spatial covariance, each also checked against what ``beta`` predicts in closed
+form, which is an absolute reference rather than a cross-check.
 
 Exits non-zero if any comparison exceeds its tolerance in config.json.
 
@@ -17,6 +17,7 @@ License: MIT
 
 import sys
 
+import h5py
 import numpy as np
 import scipy.signal as sg
 from scipy.io import loadmat
@@ -26,10 +27,10 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-from calib import ARTIFACTS, FIGURES, config  # noqa: E402
+from calib import ARTIFACTS, FIGURES, cases, config  # noqa: E402
 
-CHECKS = []      # (name, value, tolerance, ok, units)
-LINES = []       # report body
+CHECKS = []
+LINES = []
 
 
 def check(name, value, limit, ok, units=""):
@@ -48,13 +49,12 @@ def say(line=""):
 
 def nmse_db(a, b):
     """Error of ``b`` relative to ``a``, in dB."""
-    return 10 * np.log10(np.sum(np.abs(a - b) ** 2) / np.sum(np.abs(a) ** 2))
+    den = np.sum(np.abs(a) ** 2)
+    return 10 * np.log10(np.sum(np.abs(a - b) ** 2) / den) if den else np.nan
 
 
 def best_lag(a, b, max_lag=64):
-    """Integer lag of ``b`` relative to ``a`` that maximizes correlation."""
-    a = a - a.mean()
-    b = b - b.mean()
+    a, b = a - a.mean(), b - b.mean()
     c = sg.correlate(b, a, mode="full")
     lags = sg.correlation_lags(len(b), len(a), mode="full")
     keep = np.abs(lags) <= max_lag
@@ -62,134 +62,167 @@ def best_lag(a, b, max_lag=64):
 
 
 def trim(a, b, margin):
-    """Common interior of two signals, dropping ``margin`` samples each end.
-
-    The two outputs differ in length (the MATLAB replay carries 20 extra
-    samples of extrapolation buffer before the final resampling), and a
-    rational resampler's output near either edge depends on that padding, so
-    the ends are not a like-for-like comparison.
-    """
+    """Common interior of two signals, dropping ``margin`` samples each end."""
     n = min(len(a), len(b))
     return a[margin:n - margin], b[margin:n - margin]
+
+
+def load_v73_complex(path, keys):
+    """Read complex arrays MATLAB wrote with ``-v7.3``, in MATLAB's layout.
+
+    HDF5 reverses every axis and splits complex into a compound dtype, so a
+    MATLAB (K, M, T) array arrives as (T, M, K) with 'real'/'imag' fields.
+    """
+    out = {}
+    with h5py.File(path, "r") as f:
+        for k in keys:
+            d = f[k]
+            z = d["real"][...] + 1j * d["imag"][...]
+            out[k] = np.transpose(z, tuple(reversed(range(z.ndim))))
+    return out
 
 
 # ---------------------------------------------------------------------------
 # Replay
 # ---------------------------------------------------------------------------
 
-def compare_replay(cfg):
-    py = loadmat(ARTIFACTS / "python_replay.mat")
-    ml = loadmat(ARTIFACTS / "matlab_replay.mat")
+def compare_replay(case, cfg):
+    name = case["name"]
+    py = loadmat(ARTIFACTS / f"python_{name}_replay.mat")
+    ml = loadmat(ARTIFACTS / f"matlab_{name}_replay.mat")
     tol = cfg["tolerances"]
-    idx = cfg["replay"]["array_index"]
-    fs = cfg["replay"]["fs"]
+    idx = case["replay"]["array_index"]
+    fs = cfg["probe"]["fs"]
     margin = 200
 
-    def worst(key_py, key_ml):
-        return max(nmse_db(*trim(py[key_py][:, m], ml[key_ml][:, m], margin))
+    def worst(kp, km):
+        return max(nmse_db(*trim(py[kp][:, m], ml[km][:, m], margin))
                    for m in range(py["y"].shape[1]))
 
-    say("## Replay")
+    say(f"### Replay ({name})")
     say()
-    say(f"Probe: {len(py['y_resamp'])} samples at {fs / 1e3:g} kHz through "
-        f"`{cfg['data']['channel_file']}`, Python start index "
-        f"{int(py['start'].ravel()[0])} and MATLAB start index "
+    say(f"Python start {int(py['start'].ravel()[0])}, MATLAB start "
         f"{int(py['start'].ravel()[0]) + 1}, hydrophones {idx} (0-based).  "
-        "Both implementations were handed the same probe samples from "
-        "`probe.mat`, so nothing here depends on a random number generator.")
+        f"Python returns {py['y'].shape[0]} samples, MATLAB {ml['y'].shape[0]} "
+        f"(MATLAB's `buffer = 20`, resampled by q/p).  The comparison uses the "
+        f"common interior, dropping {margin} samples at each end.")
     say()
-    say(f"Python returns {py['y'].shape[0]} samples, MATLAB "
-        f"{ml['y'].shape[0]}: MATLAB allocates `T + buffer + L` with "
-        f"`buffer = 20` where Python allocates `T + L`, which after the "
-        f"closing resample by q/p is {ml['y'].shape[0] - py['y'].shape[0]} "
-        f"extra samples.  The comparison uses the common interior, dropping "
-        f"{margin} samples at each end.")
-    say()
-
     say("| what is compared | NMSE | reading |")
     say("|---|---|---|")
 
-    a, b = trim(py["y_resamp"].ravel(), ml["y_resamp"].ravel(), margin)
-    e_res = nmse_db(a, b)
+    e_res = nmse_db(*trim(py["y_resamp"].ravel(), ml["y_resamp"].ravel(), margin))
     say(f"| resampler alone, no channel | **{e_res:.0f} dB** | "
         "`resample` and `resample_poly` build the same filter |")
-    check("resampler control", e_res, tol["replay_resampler_nmse_db"],
+    check(f"{name}: resampler control", e_res, tol["replay_resampler_nmse_db"],
           e_res <= tol["replay_resampler_nmse_db"], "dB")
 
     e_static = worst("y_static", "y_static")
-    say(f"| full replay, `phi_hat` removed | **{e_static:.0f} dB** | "
-        "`h_hat` layout, spline interpolation, time-varying convolution, both "
-        "resamplings and the up-conversion agree to the last bit |")
-    check("replay with no tracking", e_static, tol["replay_static_nmse_db"],
-          e_static <= tol["replay_static_nmse_db"], "dB")
+    say(f"| replay, tracking removed | **{e_static:.0f} dB** | "
+        "`h_hat` layout, spline interpolation, convolution, both resamplings "
+        "and the up-conversion agree to the last bit |")
+    check(f"{name}: replay with no tracking", e_static,
+          tol["replay_static_nmse_db"], e_static <= tol["replay_static_nmse_db"], "dB")
 
     e_phi = worst("y", "y")
-    say(f"| full replay, `phi_hat` active | **{e_phi:.0f} dB** | "
+    say(f"| replay, tracking active | **{e_phi:.0f} dB** | "
         "the delay/phase trajectory agrees too |")
-    check("replay with delay tracking", e_phi, tol["replay_nmse_db"],
+    check(f"{name}: replay with tracking", e_phi, tol["replay_nmse_db"],
           e_phi <= tol["replay_nmse_db"], "dB")
 
     e_off = worst("y", "y_same_start")
-    say(f"| ditto, MATLAB given `start` instead of `start+1` | "
-        f"**{e_off:.0f} dB** | deliberately one sample out, and it shows |")
-    check("one-sample offset is detected", -e_off, -tol["replay_offset_probe_db"],
-          e_off > tol["replay_offset_probe_db"], "dB")
+    say(f"| ditto, MATLAB given `start` not `start+1` | **{e_off:.0f} dB** | "
+        "deliberately one sample out, and it shows |")
+    check(f"{name}: one-sample offset is detected", -e_off,
+          -tol["replay_offset_probe_db"], e_off > tol["replay_offset_probe_db"], "dB")
     say()
 
-    say("The last row is the harness testing itself.  A comparison that cannot "
-        "see a one-sample offset in `phi_hat` would pass everything, including "
-        "the defect this suite was built to find: before "
-        "`replay.m` was corrected on Sep. 16, 2026, the aligned row above read "
-        "-63 dB rather than "
-        f"{e_phi:.0f} dB, because MATLAB interpolated `h_hat` onto "
-        "`(start + 0:N-1)/fs_delay` while taking the phase from "
-        "`phi_hat(start : start+N-1)`, whose samples sit one sample of "
-        "`fs_delay` earlier.  `unpack.m` had the origin right; `replay.m` did "
-        "not.")
-    say()
-
-    say("### Per hydrophone")
-    say()
-    say("| hydrophone | NMSE, aligned | lag | NMSE, one sample out |")
-    say("|---|---|---|---|")
     for m in range(py["y"].shape[1]):
-        a1, b1 = trim(py["y"][:, m], ml["y"][:, m], margin)
-        a2, b2 = trim(py["y"][:, m], ml["y_same_start"][:, m], margin)
-        say(f"| {idx[m]} | {nmse_db(a1, b1):.0f} dB | {best_lag(a1, b1):+d} | "
-            f"{nmse_db(a2, b2):.1f} dB |")
-        lag = abs(best_lag(a1, b1))
-        check(f"replay lag, hydrophone {idx[m]}", lag, tol["replay_lag_samples"],
-              lag <= tol["replay_lag_samples"], "samples")
-    say()
+        a, b = trim(py["y"][:, m], ml["y"][:, m], margin)
+        lag = abs(best_lag(a, b))
+        check(f"{name}: replay lag, hydrophone {idx[m]}", lag,
+              tol["replay_lag_samples"], lag <= tol["replay_lag_samples"], "samples")
 
-    # Figures
     a, b = trim(py["y"][:, 0], ml["y"][:, 0], margin)
     ao, bo = trim(py["y"][:, 0], ml["y_same_start"][:, 0], margin)
     n0 = len(a) // 2
-    seg = slice(n0, n0 + 400)
-    fig, ax = plt.subplots(3, 1, figsize=(9, 9), constrained_layout=True)
-    ax[0].plot(a[seg], label="Python", lw=1.2)
-    ax[0].plot(b[seg], "--", label="MATLAB", lw=1.2)
-    ax[0].set_title(f"Replay, hydrophone {idx[0]}, 400 samples mid-record")
+    fig, ax = plt.subplots(2, 1, figsize=(9, 6), constrained_layout=True)
+    ax[0].plot(a[n0:n0 + 400], label="Python", lw=1.2)
+    ax[0].plot(b[n0:n0 + 400], "--", label="MATLAB", lw=1.2)
+    ax[0].set_title(f"{name}: replay, hydrophone {idx[0]}, 400 samples mid-record")
     ax[0].set_xlabel("Sample"); ax[0].legend(); ax[0].grid(alpha=0.3)
-
     ref = 20 * np.log10(np.abs(a).max())
     ax[1].plot(20 * np.log10(np.abs(ao - bo) + 1e-300) - ref, lw=0.6,
                label="MATLAB one sample out")
-    ax[1].plot(20 * np.log10(np.abs(a - b) + 1e-300) - ref, lw=0.6,
-               label="aligned")
-    ax[1].set_ylim(-320, 0)
+    ax[1].plot(20 * np.log10(np.abs(a - b) + 1e-300) - ref, lw=0.6, label="aligned")
+    ax[1].set_ylim(-320, 0); ax[1].set_xlabel("Sample")
     ax[1].set_title("Python minus MATLAB, dB relative to peak")
-    ax[1].set_xlabel("Sample"); ax[1].legend(); ax[1].grid(alpha=0.3)
-
-    f, Pa = sg.welch(a, fs=fs, nperseg=4096)
-    _, Pb = sg.welch(b, fs=fs, nperseg=4096)
-    ax[2].semilogy(f / 1e3, Pa, label="Python")
-    ax[2].semilogy(f / 1e3, Pb, "--", label="MATLAB")
-    ax[2].set_xlim(5, 21); ax[2].set_xlabel("Frequency [kHz]")
-    ax[2].set_title("Replay spectrum"); ax[2].legend(); ax[2].grid(alpha=0.3)
-    fig.savefig(FIGURES / "replay.png", dpi=110)
+    ax[1].legend(); ax[1].grid(alpha=0.3)
+    fig.savefig(FIGURES / f"replay_{name}.png", dpi=110)
     plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# Unpack
+# ---------------------------------------------------------------------------
+
+def compare_unpack(case, cfg):
+    name = case["name"]
+    py = loadmat(ARTIFACTS / f"python_{name}_unpack.mat")
+    ml = load_v73_complex(ARTIFACTS / f"matlab_{name}_unpack.mat", ("u", "u_fr"))
+    tol = cfg["tolerances"]
+
+    say(f"### Unpack ({name})")
+    say()
+    say(f"Unpacked to {float(py['fs_out'].ravel()[0]):g} Hz on hydrophones "
+        f"{case['unpack']['array_index']} (0-based), shape {py['u'].shape} "
+        f"(delay, element, time), with and without "
+        f"`f_resamp = {float(py['f_resamp'].ravel()[0]):.10g}`.")
+    say()
+    say("| what is compared | NMSE |")
+    say("|---|---|")
+
+    e_plain = nmse_db(py["u"], ml["u"])
+    say(f"| unpack, no `f_resamp` | **{e_plain:.0f} dB** |")
+    check(f"{name}: unpack without f_resamp", e_plain, tol["unpack_nmse_db"],
+          e_plain <= tol["unpack_nmse_db"], "dB")
+
+    e_fr = nmse_db(py["u_fr"], ml["u_fr"])
+    say(f"| unpack, `f_resamp` active | **{e_fr:.0f} dB** |")
+    check(f"{name}: unpack with f_resamp", e_fr, tol["unpack_nmse_db"],
+          e_fr <= tol["unpack_nmse_db"], "dB")
+
+    # Guard against the f_resamp path quietly doing nothing, which would make
+    # the row above pass for the wrong reason.
+    e_effect = nmse_db(py["u"], py["u_fr"])
+    say(f"| how much `f_resamp` changes the output (Python) | "
+        f"**{e_effect:.0f} dB** |")
+    check(f"{name}: f_resamp actually does something", -e_effect,
+          -tol["unpack_f_resamp_effect_db"],
+          e_effect > tol["unpack_f_resamp_effect_db"], "dB")
+    say()
+    say("Until Sep. 16, 2026 the second row read -44 dB: MATLAB built the "
+        "`f_resamp` phase ramp on `(1:N_phi)` where `t_orig`, the grid it is "
+        "interpolated from, is `(0:N_phi-1)/fs_delay`, so the ramp started one "
+        "sample of `fs_delay` in.  That put a constant phase rotation, and "
+        "through `phase_drift` a constant delay offset, on every unpacked tap.")
+    say()
+
+    k = py["u"].shape[0]
+    t = py["u"].shape[2] // 2
+    fig, ax = plt.subplots(1, 2, figsize=(11, 4), constrained_layout=True)
+    ax[0].plot(20 * np.log10(np.abs(py["u"][:, 0, t]) + 1e-300), label="Python")
+    ax[0].plot(20 * np.log10(np.abs(ml["u"][:, 0, t]) + 1e-300), "--", label="MATLAB")
+    ax[0].set_title(f"{name}: unpacked delay profile, mid-record")
+    ax[0].set_xlabel("Delay tap"); ax[0].legend(); ax[0].grid(alpha=0.3)
+    for key, lab in (("u", "no f_resamp"), ("u_fr", "f_resamp")):
+        d = np.abs(py[key] - ml[key]).ravel()
+        ax[1].plot(20 * np.log10(np.sort(d)[::max(1, len(d) // 2000)] + 1e-320),
+                   label=lab)
+    ax[1].set_title("Sorted |Python - MATLAB|, dB")
+    ax[1].set_xlabel("Sample (sorted)"); ax[1].legend(); ax[1].grid(alpha=0.3)
+    fig.savefig(FIGURES / f"unpack_{name}.png", dpi=110)
+    plt.close(fig)
+    del k
 
 
 # ---------------------------------------------------------------------------
@@ -200,16 +233,15 @@ def theory(beta, Fs, nfreq):
     """Covariance and one-sided PSD implied by the mixing coefficients.
 
     ``w(n, i) = sum_j sum_k beta(i, j, k) z(n + k, j)`` with ``z`` iid of unit
-    variance gives ``C = sum_k B_k B_k^T`` and, per output channel,
+    variance gives ``C = sum_k B_k B_k^T`` and
     ``S_i(f) = (2 / Fs) sum_j |sum_k beta(i, j, k) e^(-2 pi i f k / Fs)|^2``.
     """
     M, _, K = beta.shape
     C = np.einsum("ijk,ljk->il", beta, beta)
     f = np.linspace(0, Fs / 2, nfreq)
-    phase = np.exp(-2j * np.pi * np.outer(f, np.arange(K)) / Fs)   # (nf, K)
-    H = np.einsum("ijk,fk->ijf", beta, phase)                      # (M, M, nf)
-    S = (2.0 / Fs) * np.sum(np.abs(H) ** 2, axis=1)                # (M, nf)
-    return C, f, S
+    phase = np.exp(-2j * np.pi * np.outer(f, np.arange(K)) / Fs)
+    H = np.einsum("ijk,fk->ijf", beta, phase)
+    return C, f, (2.0 / Fs) * np.sum(np.abs(H) ** 2, axis=1)
 
 
 def coherence(C):
@@ -217,9 +249,10 @@ def coherence(C):
     return np.abs(C / np.outer(d, d))
 
 
-def compare_noise(cfg):
-    py = loadmat(ARTIFACTS / "python_noise.mat")
-    ml = loadmat(ARTIFACTS / "matlab_noise.mat")
+def compare_noise(case, cfg):
+    name = case["name"]
+    py = loadmat(ARTIFACTS / f"python_{name}_noise.mat")
+    ml = loadmat(ARTIFACTS / f"matlab_{name}_noise.mat")
     tol = cfg["tolerances"]
     nper = cfg["noise"]["welch_nperseg"]
 
@@ -227,133 +260,110 @@ def compare_noise(cfg):
     beta = np.asarray(py["beta"], dtype=float)
     Fs = float(np.asarray(py["Fs"]).ravel()[0])
     fs = float(cfg["noise"]["fs"])
+    alpha = float(np.asarray(py["alpha"]).ravel()[0])
     assert np.allclose(beta, np.asarray(ml["beta"], dtype=float)), \
         "the two runners disagree about beta itself"
 
-    say("## Noise")
+    say(f"### Noise ({name})")
     say()
-    say(f"{wp.shape[0]} samples on {wp.shape[1]} hydrophones per implementation "
-        f"({wp.shape[0] / fs:.1f} s at {fs / 1e3:g} kHz), alpha = "
-        f"{float(np.asarray(py['alpha']).ravel()[0]):g}, beta {beta.shape}.")
-    say()
-    say("The two draw from different pseudo-random streams, so they are "
-        "compared as distributions rather than sample by sample, and each is "
-        "also compared against what `beta` predicts.")
+    say(f"{wp.shape[0]} samples on {wp.shape[1]} hydrophones per "
+        f"implementation ({wp.shape[0] / fs:.1f} s at {fs / 1e3:g} kHz), "
+        f"alpha = {alpha:g}, beta {beta.shape}.  The two draw from different "
+        "pseudo-random streams, so they are compared as distributions, and "
+        "each is also compared against what `beta` predicts.")
     say()
 
-    # --- distribution ---
     sp, sm = wp.std(axis=0), wm.std(axis=0)
     kp, km = kurtosis(wp, axis=0), kurtosis(wm, axis=0)
     rel_std = np.abs(sp - sm) / sp
-    say("### Distribution")
-    say()
-    say("| hydrophone | std (Py) | std (ML) | rel. diff | excess kurtosis (Py) | (ML) | KS stat |")
-    say("|---|---|---|---|---|---|---|")
-    ks = []
     rng = np.random.default_rng(0)
-    for m in range(wp.shape[1]):
-        sub = rng.choice(wp.shape[0], size=min(60000, wp.shape[0]), replace=False)
-        d = ks_2samp(wp[sub, m], wm[sub, m]).statistic
-        ks.append(d)
-        say(f"| {m} | {sp[m]:.4g} | {sm[m]:.4g} | {rel_std[m]:.2%} | "
-            f"{kp[m]:+.3f} | {km[m]:+.3f} | {d:.4f} |")
-    say()
-    check("noise std, max relative difference", rel_std.max(),
+    sub = rng.choice(wp.shape[0], size=min(60000, wp.shape[0]), replace=False)
+    ks = [ks_2samp(wp[sub, m], wm[sub, m]).statistic for m in range(wp.shape[1])]
+
+    check(f"{name}: noise std, max relative difference", rel_std.max(),
           tol["noise_std_rel"], rel_std.max() <= tol["noise_std_rel"], "")
-    alpha = float(np.asarray(py["alpha"]).ravel()[0])
     if alpha == 2:
-        # For alpha = 2 the driver is Gaussian and the mixing is linear, so the
-        # excess kurtosis of both outputs must be zero.  That is an absolute
-        # reference; the pairwise difference below is only a cross-check.
-        check("excess kurtosis vs Gaussian (Python)", np.abs(kp).max(),
+        # A Gaussian driver through a linear mixer: excess kurtosis must be
+        # zero on both sides.  That is absolute; the pairwise row is a
+        # cross-check only.
+        check(f"{name}: excess kurtosis vs Gaussian (Python)", np.abs(kp).max(),
               tol["noise_kurtosis_abs"], np.abs(kp).max() <= tol["noise_kurtosis_abs"], "")
-        check("excess kurtosis vs Gaussian (MATLAB)", np.abs(km).max(),
+        check(f"{name}: excess kurtosis vs Gaussian (MATLAB)", np.abs(km).max(),
               tol["noise_kurtosis_abs"], np.abs(km).max() <= tol["noise_kurtosis_abs"], "")
-    check("noise excess kurtosis, max |difference|", np.abs(kp - km).max(),
-          tol["noise_kurtosis_abs"], np.abs(kp - km).max() <= tol["noise_kurtosis_abs"], "")
-    check("noise KS statistic, max", max(ks), tol["noise_ks_stat"],
+    check(f"{name}: noise KS statistic, max", max(ks), tol["noise_ks_stat"],
           max(ks) <= tol["noise_ks_stat"], "")
 
-    # --- spectrum ---
     f, Pp = sg.welch(wp, fs=fs, nperseg=nper, axis=0)
     _, Pm = sg.welch(wm, fs=fs, nperseg=nper, axis=0)
     Pp, Pm = Pp.T, Pm.T
-    band = Pp.mean(axis=0) > Pp.max() * 1e-3          # where there is power
+    band = Pp.mean(axis=0) > Pp.max() * 1e-3
     dpsd = 10 * np.log10(Pp[:, band] / Pm[:, band])
-    say("### Spectrum")
-    say()
-    say(f"Welch, nperseg {nper}, {int(band.sum())} bins inside the 30 dB band.")
-    say(f"Python vs MATLAB: rms difference **{np.sqrt((dpsd ** 2).mean()):.3f} dB**, "
-        f"max |difference| {np.abs(dpsd).max():.2f} dB.")
-    check("noise PSD, rms Python-vs-MATLAB difference", np.sqrt((dpsd ** 2).mean()),
-          tol["noise_psd_rms_db"], np.sqrt((dpsd ** 2).mean()) <= tol["noise_psd_rms_db"], "dB")
+    rms = np.sqrt((dpsd ** 2).mean())
+    check(f"{name}: noise PSD, rms Python-vs-MATLAB", rms, tol["noise_psd_rms_db"],
+          rms <= tol["noise_psd_rms_db"], "dB")
 
-    C_th, f_th, S_th = theory(beta, Fs, len(f))
+    # beta describes the whole array; the run may have generated a subset of
+    # its hydrophones, so the reference has to be taken on the same ones.
+    nidx = np.asarray(py["array_index"]).ravel().astype(int)
+    C_full, f_th, S_full = theory(beta, Fs, len(f))
+    C_th = C_full[np.ix_(nidx, nidx)]
+    S_th = S_full[nidx]
     dpy = 10 * np.log10(Pp[:, band] / S_th[:, band])
     dml = 10 * np.log10(Pm[:, band] / S_th[:, band])
-    say(f"Against the spectrum `beta` implies: Python {dpy.mean():+.2f} dB mean "
-        f"({np.sqrt((dpy ** 2).mean()):.2f} dB rms), MATLAB {dml.mean():+.2f} dB "
-        f"({np.sqrt((dml ** 2).mean()):.2f} dB rms).")
-    say()
 
-    # --- spatial correlation ---
-    Cp = np.cov(wp, rowvar=False)
-    Cm = np.cov(wm, rowvar=False)
+    Cp, Cm = np.cov(wp, rowvar=False), np.cov(wm, rowvar=False)
     gp, gm, gth = coherence(Cp), coherence(Cm), coherence(C_th)
     off = ~np.eye(len(gp), dtype=bool)
     rms_xy = np.sqrt(np.mean((gp[off] - gm[off]) ** 2))
     rms_pth = np.sqrt(np.mean((gp[off] - gth[off]) ** 2))
     rms_mth = np.sqrt(np.mean((gm[off] - gth[off]) ** 2))
-    # The transposed convention, the bug this whole exercise exists to catch.
-    gT = coherence(np.einsum("jik,ljk->il", beta, beta))
+    gT = coherence(np.einsum("jik,ljk->il", beta, beta)[np.ix_(nidx, nidx)])
     rms_pT = np.sqrt(np.mean((gp[off] - gT[off]) ** 2))
     rms_mT = np.sqrt(np.mean((gm[off] - gT[off]) ** 2))
 
-    say("### Spatial correlation")
+    say("| measure | Python vs MATLAB | Python vs `beta` | MATLAB vs `beta` |")
+    say("|---|---|---|---|")
+    say(f"| std, max rel. difference | {rel_std.max():.2%} | - | - |")
+    say(f"| excess kurtosis, max abs | {np.abs(kp - km).max():.3f} | "
+        f"{np.abs(kp).max():.3f} | {np.abs(km).max():.3f} |")
+    say(f"| KS statistic, max | {max(ks):.4f} | - | - |")
+    say(f"| PSD, rms over {int(band.sum())} in-band bins | {rms:.3f} dB | "
+        f"{np.sqrt((dpy ** 2).mean()):.3f} dB | {np.sqrt((dml ** 2).mean()):.3f} dB |")
+    say(f"| coherence, rms off-diagonal | {rms_xy:.4f} | {rms_pth:.4f} | "
+        f"{rms_mth:.4f} |")
+    say(f"| coherence vs *transposed* `beta` | - | {rms_pT:.4f} | {rms_mT:.4f} |")
     say()
-    say("| comparison | rms difference in coherence |")
-    say("|---|---|")
-    say(f"| Python vs MATLAB | {rms_xy:.4f} |")
-    say(f"| Python vs theory from `beta` | {rms_pth:.4f} |")
-    say(f"| MATLAB vs theory from `beta` | {rms_mth:.4f} |")
-    say(f"| Python vs *transposed* `beta` | {rms_pT:.4f} |")
-    say(f"| MATLAB vs *transposed* `beta` | {rms_mT:.4f} |")
+    say("The last row is the control: `beta` is not symmetric in (i, j), so an "
+        "implementation mixing `sum_j beta_ji z_j` instead of "
+        "`sum_j beta_ij z_j` lands on the transposed covariance.  Both must be "
+        "far closer to `beta` than to its transpose.")
     say()
-    say("The last two rows are the control: `beta` is not symmetric in (i, j), "
-        "so an implementation that mixes `sum_j beta_ji z_j` instead of "
-        "`sum_j beta_ij z_j` lands on the transposed covariance.  Both "
-        "implementations must be far closer to theory than to its transpose.")
-    say()
-    check("noise coherence, Python vs MATLAB", rms_xy, tol["noise_coherence_rms"],
+
+    check(f"{name}: coherence, Python vs MATLAB", rms_xy, tol["noise_coherence_rms"],
           rms_xy <= tol["noise_coherence_rms"], "")
-    check("noise coherence, Python vs theory", rms_pth, tol["noise_theory_coherence_rms"],
-          rms_pth <= tol["noise_theory_coherence_rms"], "")
-    check("noise coherence, MATLAB vs theory", rms_mth, tol["noise_theory_coherence_rms"],
-          rms_mth <= tol["noise_theory_coherence_rms"], "")
-    check("noise coherence closer to beta than to beta-transposed (Python)",
-          rms_pth, rms_pT, rms_pth < rms_pT, "")
-    check("noise coherence closer to beta than to beta-transposed (MATLAB)",
-          rms_mth, rms_mT, rms_mth < rms_mT, "")
+    check(f"{name}: coherence, Python vs theory", rms_pth,
+          tol["noise_theory_coherence_rms"], rms_pth <= tol["noise_theory_coherence_rms"], "")
+    check(f"{name}: coherence, MATLAB vs theory", rms_mth,
+          tol["noise_theory_coherence_rms"], rms_mth <= tol["noise_theory_coherence_rms"], "")
+    check(f"{name}: closer to beta than to its transpose (Python)", rms_pth,
+          rms_pT, rms_pth < rms_pT, "")
+    check(f"{name}: closer to beta than to its transpose (MATLAB)", rms_mth,
+          rms_mT, rms_mth < rms_mT, "")
 
-    # Figures
-    fig, ax = plt.subplots(2, 2, figsize=(11, 8), constrained_layout=True)
-    ax[0, 0].semilogy(f / 1e3, Pp[0], label="Python")
-    ax[0, 0].semilogy(f / 1e3, Pm[0], "--", label="MATLAB")
-    ax[0, 0].semilogy(f_th / 1e3, S_th[0], ":", color="k", label="from beta")
-    ax[0, 0].set_title("Noise PSD, hydrophone 0")
-    ax[0, 0].set_xlabel("Frequency [kHz]"); ax[0, 0].legend(); ax[0, 0].grid(alpha=0.3)
-
+    fig, ax = plt.subplots(1, 3, figsize=(14, 4), constrained_layout=True)
+    ax[0].semilogy(f / 1e3, Pp[0], label="Python")
+    ax[0].semilogy(f / 1e3, Pm[0], "--", label="MATLAB")
+    ax[0].semilogy(f_th / 1e3, S_th[0], ":", color="k", label="from beta")
+    ax[0].set_title(f"{name}: noise PSD, hydrophone 0")
+    ax[0].set_xlabel("Frequency [kHz]"); ax[0].legend(); ax[0].grid(alpha=0.3)
     edges = np.linspace(-4 * sp[0], 4 * sp[0], 160)
-    ax[0, 1].hist(wp[:, 0], bins=edges, density=True, histtype="step", label="Python")
-    ax[0, 1].hist(wm[:, 0], bins=edges, density=True, histtype="step", label="MATLAB")
-    ax[0, 1].set_yscale("log"); ax[0, 1].set_title("Amplitude distribution, hydrophone 0")
-    ax[0, 1].legend(); ax[0, 1].grid(alpha=0.3)
-
-    for a_, g_, t_ in ((ax[1, 0], gp, "Python coherence"),
-                       (ax[1, 1], gp - gth, "Python minus theory")):
-        im = a_.imshow(g_, cmap="viridis" if "minus" not in t_ else "coolwarm")
-        a_.set_title(t_); fig.colorbar(im, ax=a_)
-    fig.savefig(FIGURES / "noise.png", dpi=110)
+    ax[1].hist(wp[:, 0], bins=edges, density=True, histtype="step", label="Python")
+    ax[1].hist(wm[:, 0], bins=edges, density=True, histtype="step", label="MATLAB")
+    ax[1].set_yscale("log"); ax[1].set_title("Amplitude distribution")
+    ax[1].legend(); ax[1].grid(alpha=0.3)
+    im = ax[2].imshow(gp - gth, cmap="coolwarm")
+    ax[2].set_title("Python coherence minus theory"); fig.colorbar(im, ax=ax[2])
+    fig.savefig(FIGURES / f"noise_{name}.png", dpi=110)
     plt.close(fig)
 
 
@@ -364,21 +374,28 @@ def main():
     FIGURES.mkdir(parents=True, exist_ok=True)
     say("# Cross-implementation calibration report")
     say()
-    say(f"`{cfg['data']['channel_file']}` and `{cfg['data']['noise_file']}` "
-        f"from Zenodo record [{cfg['data']['zenodo_record']}]"
-        f"(https://doi.org/{cfg['data']['zenodo_doi']}).")
+    say(f"Files from Zenodo record [{cfg['data']['zenodo_record']}]"
+        f"(https://doi.org/{cfg['data']['zenodo_doi']}).  Both runners were "
+        "handed the same probe samples from `probe.mat`, so nothing in the "
+        "replay or unpack comparisons depends on a random number generator.")
     say()
-    compare_replay(cfg)
-    compare_noise(cfg)
+
+    for case in cases():
+        say(f"## {case['name']} (`{case['channel_file']}`, "
+            f"`{case['noise_file']}`)")
+        say()
+        compare_replay(case, cfg)
+        compare_unpack(case, cfg)
+        compare_noise(case, cfg)
 
     say("## Verdict")
     say()
     say("| check | value | tolerance | |")
     say("|---|---|---|---|")
     failed = 0
-    for name, value, limit, ok, units in CHECKS:
+    for nm, value, limit, ok, units in CHECKS:
         failed += not ok
-        say(f"| {name} | {value:.4g} {units} | {limit:.4g} {units} | "
+        say(f"| {nm} | {value:.4g} {units} | {limit:.4g} {units} | "
             f"{'pass' if ok else '**FAIL**'} |")
     say()
     say(f"{len(CHECKS) - failed} of {len(CHECKS)} checks pass.")

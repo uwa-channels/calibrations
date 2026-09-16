@@ -6,6 +6,11 @@ name: Calibrate
 
 on:
   workflow_dispatch:
+    inputs:
+      cases:
+        description: "Comma-separated case names to run (blank runs all)"
+        required: false
+        type: string
   push:
   pull_request:
   schedule:
@@ -15,6 +20,7 @@ on:
 
 env:
   UWA_CHANNELS_CACHE: ${{ github.workspace }}/data
+  UWA_CALIBRATION_CASES: ${{ inputs.cases || '' }}
 
 jobs:
   calibrate:
@@ -49,8 +55,9 @@ jobs:
       - name: Install dependencies
         run: pip install numpy scipy matplotlib h5py
 
-      # The channel file is 206 MB.  Keyed on config.json so that pointing the
-      # harness at a different record or file fetches afresh.
+      # The channel files are 740 MB together.  Keyed on config.json so that
+      # pointing the harness at a different record or file fetches afresh.
+      # Set UWA_CALIBRATION_CASES on a dispatch to run a subset instead.
       - name: Restore the library files
         uses: actions/cache@v4
         with:

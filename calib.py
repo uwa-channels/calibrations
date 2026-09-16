@@ -1,8 +1,8 @@
 """Shared helpers: config, paths, and the Zenodo fetch.
 
-Both ``make_probe.py`` and ``run_python.py`` import this; ``run_matlab.m``
-reads ``config.json`` directly with ``jsondecode`` so that neither language
-owns a second copy of the parameters.
+``make_probe.py`` and ``run_python.py`` import this; ``run_matlab.m`` reads
+``config.json`` directly with ``jsondecode``, so neither language owns a second
+copy of the parameters.
 
 Author: Zhengnan Li
 Email : uwa-channels@ofdm.link
@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parent
 ARTIFACTS = ROOT / "artifacts"
 FIGURES = ROOT / "figures"
 
-_TIMEOUT = 120.0
+_TIMEOUT = 300.0
 _CHUNK = 1 << 20
 
 
@@ -31,17 +31,30 @@ def config():
         return json.load(f)
 
 
-def data_dir():
-    """Where the library MAT-files live.
+def cases():
+    """The channel/noise pairs to calibrate on.
 
-    ``UWA_CHANNELS_CACHE`` if set, else this repository (so a checkout that
-    already sits next to the files needs no download), else the shared cache
-    the Python repository's own test suite uses.
+    ``UWA_CALIBRATION_CASES``, a comma-separated list of names, restricts the
+    run to a subset -- useful when iterating locally, or in CI where the full
+    set is three quarters of a gigabyte to fetch the first time.
     """
+    all_cases = config()["data"]["cases"]
+    want = os.environ.get("UWA_CALIBRATION_CASES", "").strip()
+    if not want:
+        return all_cases
+    names = [n.strip() for n in want.split(",") if n.strip()]
+    chosen = [c for c in all_cases if c["name"] in names]
+    missing = set(names) - {c["name"] for c in chosen}
+    if missing:
+        raise SystemExit(f"UWA_CALIBRATION_CASES names no such case: "
+                         f"{', '.join(sorted(missing))}")
+    return chosen
+
+
+def data_dir():
+    """Where the library MAT-files live: ``UWA_CHANNELS_CACHE``, else here."""
     env = os.environ.get("UWA_CHANNELS_CACHE")
-    if env:
-        return Path(env)
-    return ROOT
+    return Path(env) if env else ROOT
 
 
 def fetch(name, md5, record):
@@ -77,12 +90,12 @@ def fetch(name, md5, record):
     return dest
 
 
-def ensure_data():
-    """Make sure both MAT-files are present; return (channel_path, noise_path)."""
-    cfg = config()["data"]
+def ensure_case(case):
+    """Make sure one case's files are present; return (channel, noise) paths."""
+    record = config()["data"]["zenodo_record"]
     return (
-        fetch(cfg["channel_file"], cfg["md5"][cfg["channel_file"]], cfg["zenodo_record"]),
-        fetch(cfg["noise_file"], cfg["md5"][cfg["noise_file"]], cfg["zenodo_record"]),
+        fetch(case["channel_file"], case["md5"][case["channel_file"]], record),
+        fetch(case["noise_file"], case["md5"][case["noise_file"]], record),
     )
 
 
@@ -95,7 +108,8 @@ def _md5(path):
 
 
 if __name__ == "__main__":
-    for p in ensure_data():
-        print("ok", p)
+    for case in cases():
+        for p in ensure_case(case):
+            print("ok", p)
 
 # [EOF]

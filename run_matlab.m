@@ -5,15 +5,17 @@ function run_matlab()
 % neither language owns a second copy of the parameters or draws its own
 % random numbers for the probe.
 %
-% Produces
-%    artifacts/matlab_replay.mat   y, y_same_start, y_resamp
-%    artifacts/matlab_noise.mat    w, beta
+% For each case in config.json, produces
+%    artifacts/matlab_<case>_replay.mat   y, y_same_start, y_static, y_resamp
+%    artifacts/matlab_<case>_unpack.mat   u, u_fr
+%    artifacts/matlab_<case>_noise.mat    w, beta
 %
-% ``start`` in config.json is the Python (0-based) index, so MATLAB is given
-% ``start + 1`` throughout.  A second, deliberately misaligned replay is run at
-% the same integer: it is one sample of fs_delay out, and the comparer checks
-% that it looks clearly worse.  That is the harness testing itself -- a
-% comparison that cannot see a one-sample offset would pass everything.
+% `start` and `array_index` in config.json are the Python 0-based values, so
+% MATLAB is given them plus one throughout.  A second, deliberately misaligned
+% replay is run at the same integer: it is one sample of fs_delay out, and the
+% comparer checks that it looks clearly worse.  That is the harness testing
+% itself -- a comparison that cannot see a one-sample offset would pass
+% everything, including the defect it was built to find.
 %
 % Author: Zhengnan Li
 % Email : uwa-channels@ofdm.link
@@ -25,56 +27,90 @@ addpath(getenv_or(fullfile(here, '..', 'replay_matlab', 'src'), 'UWA_MATLAB_SRC'
 cfg = jsondecode(fileread(fullfile(here, 'config.json')));
 artifacts = fullfile(here, 'artifacts');
 if ~exist(artifacts, 'dir'); mkdir(artifacts); end
-
 data = getenv_or(here, 'UWA_CHANNELS_CACHE');
-channel_path = fullfile(data, cfg.data.channel_file);
-noise_path = fullfile(data, cfg.data.noise_file);
 
-%% Probe: the same samples the Python runner used
 probe = load(fullfile(artifacts, 'probe.mat'));
 x = double(probe.input(:));
 
-%% Replay
-channel = load(channel_path);
-fs = cfg.replay.fs;
+info = struct('impl', 'matlab', 'release', version, 'commit', ...
+    git_short(getenv_or(fullfile(here, '..', 'replay_matlab'), 'UWA_MATLAB_REPO')));
+save(fullfile(artifacts, 'matlab_env.mat'), 'info', '-v7');
+
+want = strtrim(getenv('UWA_CALIBRATION_CASES'));
+for c = 1:numel(cfg.data.cases)
+    this = case_at(cfg.data.cases, c);
+    if ~isempty(want) && ~ismember(this.name, strtrim(strsplit(want, ',')))
+        continue
+    end
+    run_one(this, cfg, x, data, artifacts);
+end
+end
+
+
+function c = case_at(cases, i)
+% jsondecode returns a struct array when every case carries the same fields
+% and a cell array when they do not, so accept either.
+if iscell(cases)
+    c = cases{i};
+else
+    c = cases(i);
+end
+end
+
+
+function run_one(case_cfg, cfg, x, data, artifacts)
+name = case_cfg.name;
+channel = load(fullfile(data, case_cfg.channel_file));
+noise = load(fullfile(data, case_cfg.noise_file));
+
+fs = cfg.probe.fs;
 fs_delay = channel.params.fs_delay;
-array_index = cfg.replay.array_index(:).' + 1;   % config is 0-based
-start = cfg.replay.start;
+
+%% Replay
+array_index = case_cfg.replay.array_index(:).' + 1;   % config is 0-based
+start = case_cfg.replay.start;
 
 [p, q] = rat(fs_delay/fs);
-down = resample(x, p, q);
-y_resamp = resample(down, q, p);
+y_resamp = resample(resample(x, p, q), q, p);
 
 y = replay(x, fs, array_index, channel, start+1);
 y_same_start = replay(x, fs, array_index, channel, start);
 
 % The same replay with the phase trajectory removed, so that h_hat, the spline
 % interpolation and the two resamplings are the only things acting.
-static = rmfield(channel, 'phi_hat');
+static = channel;
+for f = {'phi_hat', 'theta_hat', 'meta'}
+    if isfield(static, f{1}); static = rmfield(static, f{1}); end
+end
 y_static = replay(x, fs, array_index, static, start+1);
 
-fprintf('matlab replay: y %dx%d, control %d, p/q = %d/%d\n', ...
-    size(y, 1), size(y, 2), numel(y_resamp), p, q);
+fprintf('[%s] replay: y %dx%d, control %d, p/q = %d/%d\n', ...
+    name, size(y, 1), size(y, 2), numel(y_resamp), p, q);
+save(fullfile(artifacts, ['matlab_' name '_replay.mat']), 'y', ...
+    'y_same_start', 'y_static', 'y_resamp', 'start', 'array_index', ...
+    'fs_delay', '-v7');
 
-save(fullfile(artifacts, 'matlab_replay.mat'), 'y', 'y_same_start', ...
-    'y_static', 'y_resamp', 'start', 'array_index', 'fs_delay', '-v7');
-info = struct('impl', 'matlab', 'release', version, ...
-    'commit', git_short(getenv_or(fullfile(here, '..', 'replay_matlab'), 'UWA_MATLAB_REPO')), ...
-    'resamp_p', p, 'resamp_q', q);
-save(fullfile(artifacts, 'matlab_replay.mat'), 'info', '-append');
+%% Unpack, without and with f_resamp
+uidx = case_cfg.unpack.array_index(:).' + 1;
+tracked = channel;
+if isfield(tracked, 'meta'); tracked = rmfield(tracked, 'meta'); end
+u = unpack(case_cfg.unpack.fs_out, uidx, tracked, ...
+    cfg.unpack.buffer_left, cfg.unpack.buffer_right);
+tracked.f_resamp = case_cfg.unpack.f_resamp;
+u_fr = unpack(case_cfg.unpack.fs_out, uidx, tracked, ...
+    cfg.unpack.buffer_left, cfg.unpack.buffer_right);
+
+fprintf('[%s] unpack: %dx%dx%d at %g Hz, f_resamp %g\n', name, size(u), ...
+    case_cfg.unpack.fs_out, case_cfg.unpack.f_resamp);
+save(fullfile(artifacts, ['matlab_' name '_unpack.mat']), 'u', 'u_fr', '-v7.3');
 
 %% Noise
-noise = load(noise_path);
-idx = cfg.noise.array_index(:).' + 1;
+nidx = case_cfg.noise.array_index(:).' + 1;
 rng(cfg.noise.seed, 'twister');
-w = noisegen([cfg.noise.n_samples, numel(idx)], cfg.noise.fs, idx, noise);
+w = noisegen([cfg.noise.n_samples, numel(nidx)], cfg.noise.fs, nidx, noise);
 beta = noise.beta;
-
-fprintf('matlab noisegen: w %dx%d, beta %dx%dx%d\n', size(w, 1), size(w, 2), size(beta));
-
-Fs = noise.Fs; alpha = noise.alpha; fs_noise = cfg.noise.fs;
-save(fullfile(artifacts, 'matlab_noise.mat'), 'w', 'beta', 'Fs', 'alpha', ...
-    'fs_noise', 'idx', '-v7');
+fprintf('[%s] noisegen: w %dx%d, beta %dx%dx%d\n', name, size(w), size(beta));
+save(fullfile(artifacts, ['matlab_' name '_noise.mat']), 'w', 'beta', '-v7');
 end
 
 

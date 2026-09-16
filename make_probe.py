@@ -58,7 +58,7 @@ def rrc(rolloff, sps, span):
 
 
 def main():
-    cfg = config()["replay"]
+    cfg = config()["probe"]
     fs, fc = cfg["fs"], cfg["fc"]
     sps = fs / cfg["symbol_rate"]
     if sps != int(sps):
