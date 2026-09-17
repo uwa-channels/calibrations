@@ -15,6 +15,8 @@ Python start 100000, MATLAB start 100001, hydrophones [0, 3, 7] (0-based).  Pyth
 | replay, tracking active | **-233 dB** | the delay/phase trajectory agrees too |
 | ditto, MATLAB given `start` not `start+1` | **-60 dB** | a deliberate misalignment, to show the comparison resolves one |
 
+
+![blue_1: replay waveforms, and Python minus MATLAB against the deliberately misaligned pair](figures/replay_blue_1.png)
 ### Unpack (blue_1)
 
 Unpacked to 50 Hz on hydrophones [0, 3] (0-based), shape (512, 2, 2615) (delay, element, time), with and without `f_resamp = 0.9992406986`.
@@ -27,6 +29,8 @@ Unpacked to 50 Hz on hydrophones [0, 3] (0-based), shape (512, 2, 2615) (delay, 
 
 The third row is the guard on the second: `f_resamp` has to change the output substantially, or the row above it would agree for the wrong reason.
 
+
+![blue_1: unpacked impulse response, and the sorted disagreement against the peak tap](figures/unpack_blue_1.png)
 ### Noise (blue_1)
 
 524288 samples on 12 hydrophones per implementation (10.9 s at 48 kHz), alpha = 2, beta (12, 12, 129).  The two draw from different pseudo-random streams, so they are compared as distributions, and each is also compared against what `beta` predicts.
@@ -42,6 +46,8 @@ The third row is the guard on the second: `f_resamp` has to change the output su
 
 The last row is the control: `beta` is not symmetric in (i, j), so an implementation mixing `sum_j beta_ji z_j` instead of `sum_j beta_ij z_j` lands on the transposed covariance.  Both must be far closer to `beta` than to its transpose.
 
+
+![blue_1: noise spectrum against beta, amplitude distribution, and coherence minus theory](figures/noise_blue_1.png)
 ## purple_3 (`purple_3.mat`, `purple_noise_3.mat`)
 
 ### Replay (purple_3)
@@ -55,6 +61,8 @@ Python start 100000, MATLAB start 100001, hydrophones [0, 8, 16] (0-based).  Pyt
 | replay, tracking active | **-232 dB** | the delay/phase trajectory agrees too |
 | ditto, MATLAB given `start` not `start+1` | **-58 dB** | a deliberate misalignment, to show the comparison resolves one |
 
+
+![purple_3: replay waveforms, and Python minus MATLAB against the deliberately misaligned pair](figures/replay_purple_3.png)
 ### Unpack (purple_3)
 
 Unpacked to 65 Hz on hydrophones [0, 8] (0-based), shape (480, 2, 3471) (delay, element, time), with and without `f_resamp = 0.9992406986`.
@@ -67,6 +75,8 @@ Unpacked to 65 Hz on hydrophones [0, 8] (0-based), shape (480, 2, 3471) (delay, 
 
 The third row is the guard on the second: `f_resamp` has to change the output substantially, or the row above it would agree for the wrong reason.
 
+
+![purple_3: unpacked impulse response, and the sorted disagreement against the peak tap](figures/unpack_purple_3.png)
 ### Noise (purple_3)
 
 524288 samples on 12 hydrophones per implementation (10.9 s at 48 kHz), alpha = 2, beta (24, 24, 65).  The two draw from different pseudo-random streams, so they are compared as distributions, and each is also compared against what `beta` predicts.
@@ -82,6 +92,8 @@ The third row is the guard on the second: `f_resamp` has to change the output su
 
 The last row is the control: `beta` is not symmetric in (i, j), so an implementation mixing `sum_j beta_ji z_j` instead of `sum_j beta_ij z_j` lands on the transposed covariance.  Both must be far closer to `beta` than to its transpose.
 
+
+![purple_3: noise spectrum against beta, amplitude distribution, and coherence minus theory](figures/noise_purple_3.png)
 ## Verdict
 
 | check | value | tolerance | |
