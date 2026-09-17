@@ -121,12 +121,11 @@ jobs:
       - name: Commit the report to main
         if: ${{ !cancelled() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
         run: |
-          if [ ! -f artifacts/report.md ]; then
+          if [ ! -f REPORT.md ]; then
             echo "No report was produced; nothing to commit."
             exit 0
           fi
-          cp artifacts/report.md REPORT.md
-          git add REPORT.md
+          git add REPORT.md figures
           if git diff --cached --quiet; then
             echo "The report is unchanged."
             exit 0
@@ -145,7 +144,7 @@ jobs:
             echo '```'
             cat versions.txt 2>/dev/null || echo "unknown"
             echo '```'
-            cat artifacts/report.md 2>/dev/null || echo "No report: the comparison did not run."
+            cat REPORT.md 2>/dev/null || echo "No report: the comparison did not run."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the report and figures
@@ -154,7 +153,7 @@ jobs:
         with:
           name: calibration-report
           path: |
-            artifacts/report.md
+            REPORT.md
             figures/*.png
             versions.txt
           if-no-files-found: warn

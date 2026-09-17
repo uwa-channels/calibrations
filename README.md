@@ -20,8 +20,7 @@ gap.
 
 **[The latest report](REPORT.md)** is written by every CI run and committed to
 `main`, so it describes the last run rather than the last time this page was
-edited.  The figures behind it are attached to each run as the
-`calibration-report` artifact.
+edited.  It carries the figures for each comparison inline.
 
 Both implementations, on the released files, at the numerical floor:
 
@@ -119,7 +118,7 @@ python make_probe.py                 # writes artifacts/probe.mat
 
 PYTHONPATH=../replay_python/src python run_python.py
 matlab -batch run_matlab             # picks up ../replay_matlab/src
-python compare.py                    # writes artifacts/report.md, figures/*.png
+python compare.py                    # writes REPORT.md and figures/*.png
 ```
 
 `UWA_CALIBRATION_CASES=blue_1` restricts every step to a subset while
@@ -164,7 +163,8 @@ maintenance.
 pulling both implementations from their default branches so that a change to
 either is caught against the other.  It caches the Zenodo download between
 runs; the first run fetches 740 MB, later ones nothing.  Each run commits the
-report it produced to `REPORT.md`, including the runs where a check fails.
+report it produced to `REPORT.md`, with `figures/*.png` alongside it, including
+the runs where a check fails.
 
 MATLAB runs via `matlab-actions/setup-matlab`.  On GitHub-hosted runners this
 needs no license for a public repository; a private one needs an
@@ -184,8 +184,8 @@ actually diverged.
 | `make_probe.py` | builds the shared probe |
 | `run_python.py` | runs the Python implementation |
 | `run_matlab.m` | runs the MATLAB implementation |
-| `compare.py` | metrics, figures, `artifacts/report.md`, exit status |
-| `REPORT.md` | the last CI run's report, committed by the workflow |
+| `compare.py` | metrics, figures, `REPORT.md`, exit status |
+| `REPORT.md` | the last run's report, with its figures; committed by the workflow |
 
 Each case in `config.json` names a channel and a noise file and is run through
 `replay`, `unpack` (with and without `f_resamp`) and `noisegen`.  Adding a

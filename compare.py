@@ -1,4 +1,4 @@
-"""Compare the two implementations and write artifacts/report.md.
+"""Compare the two implementations and write REPORT.md.
 
 Replay and unpack are compared sample by sample: both runners were handed the
 same probe, the same channel file, the same hydrophones and the same start
@@ -27,7 +27,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-from calib import ARTIFACTS, FIGURES, cases, config  # noqa: E402
+from calib import ARTIFACTS, FIGURES, ROOT, cases, config  # noqa: E402
 
 CHECKS = []
 LINES = []
@@ -41,6 +41,16 @@ def check(name, value, limit, ok, units=""):
 def say(line=""):
     LINES.append(line)
     print(line)
+
+
+def embed(stem, caption):
+    """Link a figure into the report.
+
+    The path is relative to REPORT.md at the repository root, which is where
+    the report is written and where GitHub renders it.
+    """
+    say()
+    say(f"![{caption}](figures/{stem}.png)")
 
 
 # ---------------------------------------------------------------------------
@@ -159,6 +169,9 @@ def compare_replay(case, cfg):
     ax[1].legend(); ax[1].grid(alpha=0.3)
     fig.savefig(FIGURES / f"replay_{name}.png", dpi=110)
     plt.close(fig)
+    embed(f"replay_{name}",
+          f"{name}: replay waveforms, and Python minus MATLAB against the "
+          "deliberately misaligned pair")
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +241,9 @@ def compare_unpack(case, cfg):
     ax[1].set_xlabel("Percentile of samples"); ax[1].legend(); ax[1].grid(alpha=0.3)
     fig.savefig(FIGURES / f"unpack_{name}.png", dpi=110)
     plt.close(fig)
+    embed(f"unpack_{name}",
+          f"{name}: unpacked impulse response, and the sorted disagreement "
+          "against the peak tap")
 
 
 # ---------------------------------------------------------------------------
@@ -370,6 +386,9 @@ def compare_noise(case, cfg):
     ax[2].set_title("Python coherence minus theory"); fig.colorbar(im, ax=ax[2])
     fig.savefig(FIGURES / f"noise_{name}.png", dpi=110)
     plt.close(fig)
+    embed(f"noise_{name}",
+          f"{name}: noise spectrum against beta, amplitude distribution, and "
+          "coherence minus theory")
 
 
 # ---------------------------------------------------------------------------
@@ -405,8 +424,8 @@ def main():
     say()
     say(f"{len(CHECKS) - failed} of {len(CHECKS)} checks pass.")
 
-    (ARTIFACTS / "report.md").write_text("\n".join(LINES) + "\n")
-    print(f"\nwrote {ARTIFACTS / 'report.md'} and {FIGURES}/*.png")
+    (ROOT / "REPORT.md").write_text("\n".join(LINES) + "\n")
+    print(f"\nwrote {ROOT / 'REPORT.md'} and {FIGURES}/*.png")
     return 1 if failed else 0
 
 

@@ -2,8 +2,8 @@
 *.mat
 !artifacts/.gitkeep
 
-# Everything a run produces.
+# Everything a run produces, except REPORT.md and the figures it embeds --
+# those are committed to main, so the README can link to a current report.
 artifacts/
-figures/
 __pycache__/
 *.pyc
