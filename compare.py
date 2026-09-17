@@ -44,13 +44,17 @@ def say(line=""):
 
 
 def embed(stem, caption):
-    """Link a figure into the report.
+    """Link a figure into the report, one blank line clear on either side.
 
     The path is relative to REPORT.md at the repository root, which is where
-    the report is written and where GitHub renders it.
+    the report is written and where GitHub renders it.  The blank line after
+    matters: the next section heading follows immediately, and glued to the
+    image some renderers take it for part of the same paragraph.
     """
-    say()
+    if LINES and LINES[-1] != "":
+        say()
     say(f"![{caption}](figures/{stem}.png)")
+    say()
 
 
 # ---------------------------------------------------------------------------
