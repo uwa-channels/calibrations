@@ -26,6 +26,10 @@ jobs:
   calibrate:
     runs-on: ubuntu-latest
 
+    # To commit the report back to main.
+    permissions:
+      contents: write
+
     # Job level rather than on the step: a secret cannot be read from an `if:`
     # expression, but the env context can, and the MATLAB steps gate on it.
     env:
@@ -107,6 +111,31 @@ jobs:
       - name: Compare
         if: steps.matlab_run.outcome == 'success'
         run: python compare.py
+
+      # main carries a rendered copy of the report, so the README can link to
+      # something that is current rather than to a run id that ages.  Committed
+      # even when compare.py fails its tolerances: a linked report that quietly
+      # stops updating is worse than one showing a FAIL.  Only from main -- a
+      # pull request's report describes a commit that may never land -- and
+      # [skip ci], or pushing it would start this workflow again.
+      - name: Commit the report to main
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+        run: |
+          if [ ! -f artifacts/report.md ]; then
+            echo "No report was produced; nothing to commit."
+            exit 0
+          fi
+          cp artifacts/report.md REPORT.md
+          git add REPORT.md
+          if git diff --cached --quiet; then
+            echo "The report is unchanged."
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -q -m "Update the calibration report [skip ci]" \
+                        -m "$(cat versions.txt)"
+          git push
 
       - name: Publish the report
         if: always()

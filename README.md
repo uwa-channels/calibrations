@@ -1,5 +1,7 @@
 # Cross-implementation calibration
 
+[![Calibrate](https://github.com/uwa-channels/calibrations/actions/workflows/calibrate.yml/badge.svg)](https://github.com/uwa-channels/calibrations/actions/workflows/calibrate.yml)
+
 Checks that [`uwa-channels/python`](https://github.com/uwa-channels/python) and
 [`uwa-channels/matlab`](https://github.com/uwa-channels/matlab) do the same
 thing to the same data.  Both replay the same probe through the same channel
@@ -15,6 +17,11 @@ against each other on the files a user actually downloads is what closes that
 gap.
 
 ## What it reports
+
+**[The latest report](REPORT.md)** is written by every CI run and committed to
+`main`, so it describes the last run rather than the last time this page was
+edited.  The figures behind it are attached to each run as the
+`calibration-report` artifact.
 
 Both implementations, on the released files, at the numerical floor:
 
@@ -156,13 +163,17 @@ maintenance.
 `.github/workflows/calibrate.yml` runs the whole thing weekly and on demand,
 pulling both implementations from their default branches so that a change to
 either is caught against the other.  It caches the Zenodo download between
-runs; the first run fetches 740 MB, later ones nothing.
+runs; the first run fetches 740 MB, later ones nothing.  Each run commits the
+report it produced to `REPORT.md`, including the runs where a check fails.
 
 MATLAB runs via `matlab-actions/setup-matlab`.  On GitHub-hosted runners this
-needs no license for a public repository; a private one needs a
-`MATLAB_BATCH_LICENSE_TOKEN` secret.  The MATLAB job is allowed to be skipped
-rather than fail the workflow when no license is available, so a fork still
-gets the Python-side checks against `beta`.
+needs no license for a public repository; a private one needs an
+`MLM_LICENSE_TOKEN` secret.  The two MATLAB steps are skipped when neither
+applies, so a fork without a token still gets the Python-side checks against
+`beta`.  They are gated on the token and not on whether setup succeeded:
+setup installs MATLAB without a license and only the run fails, so the outcome
+of setup cannot tell an unlicensed runner from an implementation that has
+actually diverged.
 
 ## Files
 
@@ -174,6 +185,7 @@ gets the Python-side checks against `beta`.
 | `run_python.py` | runs the Python implementation |
 | `run_matlab.m` | runs the MATLAB implementation |
 | `compare.py` | metrics, figures, `artifacts/report.md`, exit status |
+| `REPORT.md` | the last CI run's report, committed by the workflow |
 
 Each case in `config.json` names a channel and a noise file and is run through
 `replay`, `unpack` (with and without `f_resamp`) and `noisegen`.  Adding a
