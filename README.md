@@ -58,10 +58,9 @@ unpacked output at all.  Without them, a comparison too blunt to resolve a
 single sample, or one passing because a code path did nothing, would report
 success.
 
-One difference is reported rather than flagged: MATLAB's `replay` returns 98
-more samples than Python's for the same input, because it allocates
-`T + buffer + L` with `buffer = 20` where Python allocates `T + L`.  It
-changes no sample they have in common.
+Both return the same number of samples from `replay`, which is checked: each
+pads the output by the largest delay drift in the replay window, measured from
+the starting sample.
 
 ## What it covers
 

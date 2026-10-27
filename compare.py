@@ -117,10 +117,13 @@ def compare_replay(case, cfg):
     say()
     say(f"Python start {int(py['start'].ravel()[0])}, MATLAB start "
         f"{int(py['start'].ravel()[0]) + 1}, hydrophones {idx} (0-based).  "
-        f"Python returns {py['y'].shape[0]} samples, MATLAB {ml['y'].shape[0]} "
-        f"(MATLAB's `buffer = 20`, resampled by q/p).  The comparison uses the "
-        f"common interior, dropping {margin} samples at each end.")
+        f"Python returns {py['y'].shape[0]} samples, MATLAB {ml['y'].shape[0]}.  "
+        f"The comparison uses the common interior, dropping {margin} samples at "
+        f"each end.")
     say()
+    n_diff = abs(py["y"].shape[0] - ml["y"].shape[0])
+    check(f"{name}: replay output length, Python minus MATLAB", n_diff, 0,
+          n_diff == 0, "samples")
     say("| what is compared | NMSE | reading |")
     say("|---|---|---|")
 
@@ -157,7 +160,6 @@ def compare_replay(case, cfg):
               tol["replay_lag_samples"], lag <= tol["replay_lag_samples"], "samples")
 
     a, b = trim(py["y"][:, 0], ml["y"][:, 0], margin)
-    ao, bo = trim(py["y"][:, 0], ml["y_same_start"][:, 0], margin)
     n0 = len(a) // 2
     fig, ax = plt.subplots(2, 1, figsize=(9, 6), constrained_layout=True)
     ax[0].plot(a[n0:n0 + 400], label="Python", lw=1.2)
@@ -165,17 +167,14 @@ def compare_replay(case, cfg):
     ax[0].set_title(f"{name}: replay, hydrophone {idx[0]}, 400 samples mid-record")
     ax[0].set_xlabel("Sample"); ax[0].legend(); ax[0].grid(alpha=0.3)
     ref = 20 * np.log10(np.abs(a).max())
-    ax[1].plot(20 * np.log10(np.abs(ao - bo) + 1e-300) - ref, lw=0.6,
-               label="deliberately misaligned")
-    ax[1].plot(20 * np.log10(np.abs(a - b) + 1e-300) - ref, lw=0.6, label="aligned")
+    ax[1].plot(20 * np.log10(np.abs(a - b) + 1e-300) - ref, lw=0.6)
     ax[1].set_ylim(-320, 0); ax[1].set_xlabel("Sample")
     ax[1].set_title("Python minus MATLAB, dB relative to peak")
-    ax[1].legend(); ax[1].grid(alpha=0.3)
+    ax[1].grid(alpha=0.3)
     fig.savefig(FIGURES / f"replay_{name}.png", dpi=110)
     plt.close(fig)
     embed(f"replay_{name}",
-          f"{name}: replay waveforms, and Python minus MATLAB against the "
-          "deliberately misaligned pair")
+          f"{name}: replay waveforms, and Python minus MATLAB")
 
 
 # ---------------------------------------------------------------------------
