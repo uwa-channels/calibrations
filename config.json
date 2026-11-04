@@ -100,10 +100,6 @@
     "guard_samples": 4800,
     "symbol_seed": 20260916
   },
-  "unpack": {
-    "buffer_left": 0.3,
-    "buffer_right": 0.3
-  },
   "noise": {
     "fs": 48000.0,
     "n_samples": 524288,

@@ -208,8 +208,10 @@ def compare_unpack(case, cfg):
           e_fr <= tol["unpack_nmse_db"], "dB")
 
     # Guard against the f_resamp path quietly doing nothing, which would make
-    # the row above pass for the wrong reason.
-    e_effect = nmse_db(py["u"], py["u_fr"])
+    # the row above pass for the wrong reason.  f_resamp's drift widens the
+    # padding, so compare the sums over the delay axis, which padding leaves
+    # alone and which carry the f_resamp phase ramp.
+    e_effect = nmse_db(py["u"].sum(axis=0), py["u_fr"].sum(axis=0))
     say(f"| how much `f_resamp` changes the output (Python) | "
         f"**{e_effect:.0f} dB** |")
     check(f"{name}: f_resamp actually does something", -e_effect,
@@ -233,7 +235,7 @@ def compare_unpack(case, cfg):
     ax[0].legend(); ax[0].grid(alpha=0.3)
 
     # Sorted magnitude of the disagreement, relative to the peak tap.  The
-    # buffer taps are exactly zero in both, hence the floor.
+    # padding taps are exactly zero in both, hence the floor.
     for key, lab in (("u", "no f_resamp"), ("u_fr", "f_resamp")):
         d = np.sort(np.abs(py[key] - ml[key]).ravel())
         d = d[:: max(1, len(d) // 2000)]

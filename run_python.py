@@ -62,10 +62,9 @@ def run_case(case, cfg, x):
     print(f"[{name}] replay: y {y.shape}, control {y_resamp.shape}, p/q = {frac}")
 
     # ---- unpack -----------------------------------------------------------
-    ucfg, shared = case["unpack"], cfg["unpack"]
+    ucfg = case["unpack"]
     uidx = list(ucfg["array_index"])
-    u = unpack(ucfg["fs_out"], uidx, channel, shared["buffer_left"],
-               shared["buffer_right"])
+    u = unpack(ucfg["fs_out"], uidx, channel)
     # Build the f_resamp channel explicitly rather than copying the open
     # file: an h5py.File also carries `meta` and `#refs#`, which unpack has no
     # use for and which would differ from what MATLAB's load() hands over.
@@ -74,8 +73,7 @@ def run_case(case, cfg, x):
         if k in channel:
             tracked[k] = channel[k]
     tracked["f_resamp"] = np.array([[ucfg["f_resamp"]]])
-    u_fr = unpack(ucfg["fs_out"], uidx, tracked,
-                  shared["buffer_left"], shared["buffer_right"])
+    u_fr = unpack(ucfg["fs_out"], uidx, tracked)
     savemat(ARTIFACTS / f"python_{name}_unpack.mat", {
         "u": u, "u_fr": u_fr, "fs_out": float(ucfg["fs_out"]),
         "f_resamp": float(ucfg["f_resamp"]),

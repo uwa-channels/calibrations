@@ -30,7 +30,7 @@ Both implementations, on the released files, at the numerical floor:
 | replay, tracking removed | -234 dB | -232 dB |
 | replay, tracking active | -233 dB | -232 dB |
 | unpack, no `f_resamp` | -291 dB | -298 dB |
-| unpack, `f_resamp` active | -260 dB | -264 dB |
+| unpack, `f_resamp` active | -256 dB | -255 dB |
 
 Noise cannot be compared sample by sample, so it is compared as a
 distribution, a spectrum and a spatial covariance:

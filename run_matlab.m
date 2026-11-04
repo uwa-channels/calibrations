@@ -93,11 +93,9 @@ save(fullfile(artifacts, ['matlab_' name '_replay.mat']), 'y', ...
 uidx = case_cfg.unpack.array_index(:).' + 1;
 tracked = channel;
 if isfield(tracked, 'meta'); tracked = rmfield(tracked, 'meta'); end
-u = unpack(case_cfg.unpack.fs_out, uidx, tracked, ...
-    cfg.unpack.buffer_left, cfg.unpack.buffer_right);
+u = unpack(case_cfg.unpack.fs_out, uidx, tracked);
 tracked.f_resamp = case_cfg.unpack.f_resamp;
-u_fr = unpack(case_cfg.unpack.fs_out, uidx, tracked, ...
-    cfg.unpack.buffer_left, cfg.unpack.buffer_right);
+u_fr = unpack(case_cfg.unpack.fs_out, uidx, tracked);
 
 fprintf('[%s] unpack: %dx%dx%d at %g Hz, f_resamp %g\n', name, size(u), ...
     case_cfg.unpack.fs_out, case_cfg.unpack.f_resamp);
