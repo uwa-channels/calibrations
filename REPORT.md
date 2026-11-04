@@ -19,13 +19,13 @@ Python start 100000, MATLAB start 100001, hydrophones [0, 3, 7] (0-based).  Pyth
 
 ### Unpack (blue_1)
 
-Unpacked to 50 Hz on hydrophones [0, 3] (0-based), shape (512, 2, 2615) (delay, element, time), with and without `f_resamp = 0.9992406986`.
+Unpacked to 50 Hz on hydrophones [0, 3] (0-based), shape (332, 2, 2615) (delay, element, time), with and without `f_resamp = 0.9992406986`.
 
 | what is compared | NMSE |
 |---|---|
 | unpack, no `f_resamp` | **-291 dB** |
-| unpack, `f_resamp` active | **-260 dB** |
-| how much `f_resamp` changes the output (Python) | **2 dB** |
+| unpack, `f_resamp` active | **-256 dB** |
+| how much `f_resamp` changes the output (Python) | **3 dB** |
 
 The third row is the guard on the second: `f_resamp` has to change the output substantially, or the row above it would agree for the wrong reason.
 
@@ -65,13 +65,13 @@ Python start 100000, MATLAB start 100001, hydrophones [0, 8, 16] (0-based).  Pyt
 
 ### Unpack (purple_3)
 
-Unpacked to 65 Hz on hydrophones [0, 8] (0-based), shape (480, 2, 3471) (delay, element, time), with and without `f_resamp = 0.9992406986`.
+Unpacked to 65 Hz on hydrophones [0, 8] (0-based), shape (300, 2, 3471) (delay, element, time), with and without `f_resamp = 0.9992406986`.
 
 | what is compared | NMSE |
 |---|---|
 | unpack, no `f_resamp` | **-298 dB** |
-| unpack, `f_resamp` active | **-264 dB** |
-| how much `f_resamp` changes the output (Python) | **1 dB** |
+| unpack, `f_resamp` active | **-255 dB** |
+| how much `f_resamp` changes the output (Python) | **3 dB** |
 
 The third row is the guard on the second: `f_resamp` has to change the output substantially, or the row above it would agree for the wrong reason.
 
@@ -107,8 +107,8 @@ The last row is the control: `beta` is not symmetric in (i, j), so an implementa
 | blue_1: replay lag, hydrophone 3 | 0 samples | 0 samples | pass |
 | blue_1: replay lag, hydrophone 7 | 0 samples | 0 samples | pass |
 | blue_1: unpack without f_resamp | -291.2 dB | -200 dB | pass |
-| blue_1: unpack with f_resamp | -259.5 dB | -200 dB | pass |
-| blue_1: f_resamp actually does something | -2.351 dB | 20 dB | pass |
+| blue_1: unpack with f_resamp | -256.1 dB | -200 dB | pass |
+| blue_1: f_resamp actually does something | -2.973 dB | 20 dB | pass |
 | blue_1: noise std, max relative difference | 0.007539  | 0.02  | pass |
 | blue_1: excess kurtosis vs Gaussian (Python) | 0.03019  | 0.15  | pass |
 | blue_1: excess kurtosis vs Gaussian (MATLAB) | 0.02406  | 0.15  | pass |
@@ -128,8 +128,8 @@ The last row is the control: `beta` is not symmetric in (i, j), so an implementa
 | purple_3: replay lag, hydrophone 8 | 0 samples | 0 samples | pass |
 | purple_3: replay lag, hydrophone 16 | 0 samples | 0 samples | pass |
 | purple_3: unpack without f_resamp | -298.3 dB | -200 dB | pass |
-| purple_3: unpack with f_resamp | -264.3 dB | -200 dB | pass |
-| purple_3: f_resamp actually does something | -1.138 dB | 20 dB | pass |
+| purple_3: unpack with f_resamp | -255.1 dB | -200 dB | pass |
+| purple_3: f_resamp actually does something | -3.029 dB | 20 dB | pass |
 | purple_3: noise std, max relative difference | 0.006694  | 0.02  | pass |
 | purple_3: excess kurtosis vs Gaussian (Python) | 0.01368  | 0.15  | pass |
 | purple_3: excess kurtosis vs Gaussian (MATLAB) | 0.02043  | 0.15  | pass |
